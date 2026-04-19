@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gold Price Analyst</title>
+  <link rel="stylesheet" href="./gold.css">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
+  <script src="./gold.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="logo" data-i18n="site_title">Gold Price Analyst</div>
+    <div class="header-ticker">
+      <div class="ticker-price" id="header-price">Loading...</div>
+      <div class="ticker-change flat" id="header-change" data-i18n="waiting_data">Waiting for data</div>
+    </div>
+    <div class="header-meta">
+      <div id="header-date">GC=F · COMEX</div>
+      <div id="header-updated">Updating…</div>
+    </div>
+    <div class="lang-switch" aria-label="Language switcher">
+      <button class="lang-btn active" id="lang-en" data-lang="en" type="button">EN</button>
+      <button class="lang-btn" id="lang-zh" data-lang="zh" type="button">中文</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="summary-bar">
+      <article class="stat-card">
+        <div class="stat-label" data-i18n="current_price">Current Price</div>
+        <div class="stat-value" id="stat-price">--</div>
+        <div class="stat-delta" id="stat-change">--</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-label" data-i18n="window_change">Window Change</div>
+        <div class="stat-value" id="stat-window-change">--</div>
+        <div class="stat-delta" id="stat-window-pct">--</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-label" data-i18n="period_high">Period High</div>
+        <div class="stat-value" id="stat-high">--</div>
+      </article>
+      <article class="stat-card">
+        <div class="stat-label" data-i18n="period_low">Period Low</div>
+        <div class="stat-value" id="stat-low">--</div>
+      </article>
+    </section>
+
+    <section class="tab-bar">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="patterns" data-i18n="tab_patterns" type="button">Patterns</button>
+        <button class="tab-btn" data-tab="sentiment" data-i18n="tab_sentiment" type="button">Sentiment</button>
+        <button class="tab-btn" data-tab="backtest" data-i18n="tab_backtest" type="button">Backtest</button>
+        <button class="tab-btn" data-tab="risk" data-i18n="tab_risk" type="button">Risk</button>
+      </div>
+      <div class="controls">
+        <span class="control-label" data-i18n="window">Window</span>
+        <input id="days-slider" type="range" min="60" max="365" step="30" value="180">
+        <span class="control-label" id="days-label">180d</span>
+        <button class="btn-refresh" id="btn-refresh" data-i18n="refresh" type="button">Refresh</button>
+      </div>
+    </section>
+
+    <section class="tab-panel active" id="tab-patterns">
+      <div class="metrics">
+        <article class="metric" id="m-rsi">
+          <div class="metric-label">RSI</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted" data-i18n="awaiting_data">Awaiting data</div>
+        </article>
+        <article class="metric" id="m-macd">
+          <div class="metric-label">MACD</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted" data-i18n="awaiting_data">Awaiting data</div>
+        </article>
+        <article class="metric" id="m-bb">
+          <div class="metric-label" data-i18n="bollinger_position">Bollinger Position</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted" data-i18n="awaiting_data">Awaiting data</div>
+        </article>
+        <article class="metric" id="m-ma">
+          <div class="metric-label" data-i18n="ma_trend">MA Trend</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted" data-i18n="awaiting_data">Awaiting data</div>
+        </article>
+      </div>
+      <div class="chart-box">
+        <div id="patterns-chart"></div>
+      </div>
+      <div class="sr-row" id="sr-row"></div>
+    </section>
+
+    <section class="tab-panel" id="tab-sentiment">
+      <div class="sentiment-top">
+        <article class="gauge-box" id="sentiment-gauge"></article>
+        <div class="chart-box">
+          <div id="sentiment-donut"></div>
+        </div>
+      </div>
+      <div class="chart-box">
+        <div id="sentiment-bars"></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-backtest">
+      <div class="metrics">
+        <article class="metric" id="m-bh">
+          <div class="metric-label" data-i18n="buy_hold">Buy & Hold</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted" data-i18n="baseline_return">Baseline return</div>
+        </article>
+        <article class="metric" id="m-strat-0">
+          <div class="metric-label" data-i18n="trend_strategy">Trend Strategy</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted" data-i18n="awaiting_data">Awaiting data</div>
+        </article>
+        <article class="metric" id="m-strat-1">
+          <div class="metric-label" data-i18n="mean_reversion">Mean Reversion</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted" data-i18n="awaiting_data">Awaiting data</div>
+        </article>
+        <article class="metric" id="m-strat-2">
+          <div class="metric-label" data-i18n="breakout">Breakout</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted" data-i18n="awaiting_data">Awaiting data</div>
+        </article>
+      </div>
+      <div class="chart-box">
+        <div id="backtest-chart"></div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th data-i18n="strategy">Strategy</th>
+              <th data-i18n="total_return">Total Return</th>
+              <th data-i18n="vs_bh">Vs B&amp;H</th>
+              <th>Sharpe</th>
+              <th data-i18n="max_drawdown">Max Drawdown</th>
+              <th data-i18n="win_rate">Win Rate</th>
+              <th data-i18n="trades">Trades</th>
+            </tr>
+          </thead>
+          <tbody id="backtest-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-risk">
+      <div class="metrics">
+        <article class="metric" id="m-sharpe">
+          <div class="metric-label">Sharpe</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted" data-i18n="awaiting_data">Awaiting data</div>
+        </article>
+        <article class="metric" id="m-sortino">
+          <div class="metric-label">Sortino</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted"></div>
+        </article>
+        <article class="metric" id="m-var95">
+          <div class="metric-label">VaR 95%</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted"></div>
+        </article>
+        <article class="metric" id="m-maxdd">
+          <div class="metric-label" data-i18n="max_drawdown">Max Drawdown</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted"></div>
+        </article>
+        <article class="metric" id="m-vol">
+          <div class="metric-label" data-i18n="full_volatility">Full Volatility</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted"></div>
+        </article>
+        <article class="metric" id="m-vol30">
+          <div class="metric-label" data-i18n="volatility_30d">30D Volatility</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted"></div>
+        </article>
+        <article class="metric" id="m-skew">
+          <div class="metric-label">Skewness</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted"></div>
+        </article>
+        <article class="metric" id="m-kurt">
+          <div class="metric-label">Kurtosis</div>
+          <div class="metric-value">--</div>
+          <div class="metric-signal muted"></div>
+        </article>
+      </div>
+      <div class="two-col">
+        <div class="chart-box">
+          <div id="risk-vol-chart"></div>
+        </div>
+        <div class="chart-box">
+          <div id="risk-dist-chart"></div>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="chart-box">
+          <div id="risk-dd-chart"></div>
+        </div>
+        <div class="chart-box">
+          <div id="risk-corr-chart"></div>
+        </div>
+      </div>
+    </section>
+
+    <p class="disclaimer" data-i18n="disclaimer">Live COMEX gold data is served through the local API, with fallback only if the upstream source is unavailable.</p>
+  </main>
+</body>
+</html>
