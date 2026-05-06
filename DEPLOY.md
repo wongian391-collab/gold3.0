@@ -17,7 +17,7 @@ Render docs:
 ## Notes
 
 - Public mode no longer silently falls back to generated mock prices.
-- Correlation data is intentionally disabled until a verified comparison feed is connected.
+- Cross-asset correlations use aligned daily returns from Yahoo chart feeds for DXY, silver futures, S&P 500, and UST 10Y.
 - Sentiment can fall back to market-derived text if the live news feed is unavailable.
 
 ## Local run

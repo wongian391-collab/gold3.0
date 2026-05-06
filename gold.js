@@ -73,7 +73,7 @@ const I18N = {
     frequency: 'Frequency',
     volatility_pct: 'Volatility %',
     drawdown_pct: 'Drawdown %',
-    correlation_unavailable: 'Cross-asset correlations are unavailable because no verified comparison feed is connected yet.',
+    correlation_unavailable: 'Cross-asset correlations are unavailable because comparison feeds could not be loaded.',
     portfolio_value: 'Portfolio Value (start = 100)',
     pearson: 'Pearson Correlation',
     usd_per_oz: 'USD / oz',
@@ -139,7 +139,7 @@ const I18N = {
     frequency: '频次',
     volatility_pct: '波动率 %',
     drawdown_pct: '回撤 %',
-    correlation_unavailable: '由于尚未接入经过验证的对比数据源，跨资产相关性暂不可用。',
+    correlation_unavailable: '由于对比数据源暂时无法加载，跨资产相关性暂不可用。',
     portfolio_value: '组合净值（起始 = 100）',
     pearson: '皮尔逊相关系数',
     usd_per_oz: '美元 / 盎司',
@@ -476,6 +476,7 @@ const fmtN   = (n, d = 2) => n == null ? '—' : Number(n).toLocaleString('en-US
 const fmtUSD = n => '$' + fmtN(n);
 const fmtPct = n => (n >= 0 ? '+' : '') + fmtN(n) + '%';
 const sign   = n => n >= 0 ? 'bull' : 'bear';
+const moveClass = n => n > 0 ? 'up' : n < 0 ? 'down' : 'flat';
 const t = (key, ...args) => {
   const value = I18N[currentLang]?.[key] ?? I18N.en[key] ?? key;
   return typeof value === 'function' ? value(...args) : value;
@@ -684,14 +685,16 @@ function initAutoRefresh() {
 async function loadHeader() {
   try {
     const d = await apiFetch(`/api/data?days=${days}`);
-    if (d.error) return;
+    if (d.error) throw new Error(d.error);
 
     setText('header-price', fmtUSD(d.last_price));
+    const dailyChange = d.daily_change ?? d.change ?? 0;
+    const dailyPctChange = d.daily_pct_change ?? d.pct_change ?? 0;
     const chEl = $id('header-change');
-    const arrow = d.change >= 0 ? '▲' : '▼';
+    const arrow = dailyChange >= 0 ? '▲' : '▼';
     if (chEl) {
-      chEl.textContent = `${arrow} ${fmtUSD(Math.abs(d.change))} (${fmtPct(d.pct_change)})`;
-      chEl.className = 'ticker-change ' + (d.change >= 0 ? 'up' : 'down');
+      chEl.textContent = `${arrow} ${fmtUSD(Math.abs(dailyChange))} (${fmtPct(dailyPctChange)})`;
+      chEl.className = 'ticker-change ' + moveClass(dailyChange);
     }
     setText('header-date', t('market_window', days, d.market_date || d.dates.at(-1)));
     setText('header-updated', t('last_checked', fmtLocalTime(d.last_updated)));
@@ -699,8 +702,8 @@ async function loadHeader() {
     setText('stat-price', fmtUSD(d.last_price));
     const chDelta = $id('stat-change');
     if (chDelta) {
-      chDelta.textContent = t('daily_prefix', `${d.daily_change >= 0 ? '▲' : '▼'} ${fmtPct(d.daily_pct_change)}`);
-      chDelta.className = 'stat-delta ' + sign(d.change);
+      chDelta.textContent = t('daily_prefix', `${dailyChange >= 0 ? '▲' : '▼'} ${fmtPct(dailyPctChange)}`);
+      chDelta.className = 'stat-delta ' + sign(dailyChange);
     }
     setText('stat-window-change', fmtUSD(d.change));
     const windowPct = $id('stat-window-pct');
@@ -710,7 +713,16 @@ async function loadHeader() {
     }
     setText('stat-high', fmtUSD(d.period_high));
     setText('stat-low', fmtUSD(d.period_low));
-  } catch (e) { console.error('header:', e); }
+  } catch (e) {
+    console.error('header:', e);
+    setText('header-price', 'Unavailable');
+    const chEl = $id('header-change');
+    if (chEl) {
+      chEl.textContent = e.message || t('waiting_data');
+      chEl.className = 'ticker-change flat';
+    }
+    setText('header-updated', t('waiting_data'));
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1014,9 +1026,11 @@ async function loadRisk() {
         type: 'bar',
         x: d.correlations.map(c => c.label),
         y: d.correlations.map(c => c.corr),
+        customdata: d.correlations.map(c => [c.symbol, c.observations]),
         marker: { color: d.correlations.map(c => c.corr > 0 ? '#22c55e' : '#ef4444') },
         text: d.correlations.map(c => (c.corr >= 0 ? '+' : '') + c.corr.toFixed(3)),
         textposition: 'outside',
+        hovertemplate: '%{x}<br>%{customdata[0]}<br>Correlation: %{y:.3f}<br>Aligned days: %{customdata[1]}<extra></extra>',
       }], plyLayout({
         height: 280, showlegend: false,
         yaxis: { title: t('pearson'), range: [-1.15, 1.15], gridcolor: '#334155' },

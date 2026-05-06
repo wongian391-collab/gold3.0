@@ -19,7 +19,13 @@ ROOT = Path(__file__).resolve().parent
 CACHE_TTL_SECONDS = 60
 USER_AGENT = "GoldPriceAnalyst/1.0"
 NEWS_FEED = "https://news.google.com/rss/search?q=gold+price&hl=en-US&gl=US&ceid=US:en"
-YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range={range_days}d&interval=1d&includePrePost=false&events=div%2Csplits"
+YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_days}d&interval=1d&includePrePost=false&events=div%2Csplits"
+CORRELATION_ASSETS = [
+  {"label": "DXY", "symbol": "DX-Y.NYB"},
+  {"label": "Silver", "symbol": "SI=F"},
+  {"label": "S&P 500", "symbol": "^GSPC"},
+  {"label": "UST 10Y", "symbol": "^TNX"},
+]
 
 _CACHE = {}
 
@@ -150,14 +156,39 @@ def annualized_sortino(returns):
   return mean(returns) / sigma * math.sqrt(252)
 
 
-def price_history(required_days):
-  key = f"history:{required_days}"
+def pearson_corr(a_values, b_values):
+  if len(a_values) < 2 or len(a_values) != len(b_values):
+    return None
+  a_mean = mean(a_values)
+  b_mean = mean(b_values)
+  numerator = sum((a - a_mean) * (b - b_mean) for a, b in zip(a_values, b_values))
+  a_var = sum((a - a_mean) ** 2 for a in a_values)
+  b_var = sum((b - b_mean) ** 2 for b in b_values)
+  denominator = math.sqrt(a_var * b_var)
+  if denominator == 0:
+    return None
+  return numerator / denominator
+
+
+def daily_returns_by_date(rows):
+  out = {}
+  for i in range(1, len(rows)):
+    prev_close = rows[i - 1]["close"]
+    close = rows[i]["close"]
+    if prev_close:
+      out[rows[i]["date"]] = ((close / prev_close) - 1) * 100
+  return out
+
+
+def chart_history(symbol, required_days, normalize_scaled_gold=False):
+  key = f"history:{symbol}:{required_days}"
   cached = cache_get(key)
   if cached is not None:
     return cached
 
   range_days = max(required_days + 260, 450)
-  payload = fetch_json(YAHOO_CHART.format(range_days=range_days))
+  encoded_symbol = urllib.parse.quote(symbol, safe="")
+  payload = fetch_json(YAHOO_CHART.format(symbol=encoded_symbol, range_days=range_days))
   result = payload["chart"]["result"][0]
   quote = result["indicators"]["quote"][0]
   timestamps = result.get("timestamp", [])
@@ -182,13 +213,11 @@ def price_history(required_days):
       "volume": int(volumes[idx]) if volumes[idx] is not None else 0,
     })
 
-  if len(rows) < max(required_days, 210):
-    raise ValueError("Not enough historical price data returned")
+  if len(rows) < max(required_days, 30):
+    raise ValueError(f"Not enough historical data returned for {symbol}")
 
-  # Yahoo occasionally returns the GC=F chart series scaled down by 100.
-  # Normalize it back to USD/oz so the dashboard doesn't show ~$27 gold.
   median_close = statistics.median(row["close"] for row in rows)
-  if median_close < 100:
+  if normalize_scaled_gold and median_close < 100:
     for row in rows:
       row["close"] *= 100
       row["open"] *= 100
@@ -196,6 +225,13 @@ def price_history(required_days):
       row["low"] *= 100
 
   return cache_set(key, rows)
+
+
+def price_history(required_days):
+  history = chart_history("GC=F", required_days, normalize_scaled_gold=True)
+  if len(history) < max(required_days, 210):
+    raise ValueError("Not enough historical price data returned")
+  return history
 
 
 def nearest_levels(prices, last_price):
@@ -379,6 +415,41 @@ def build_backtest_payload(days):
   }
 
 
+def build_cross_asset_correlations(gold_dates, gold_prices, days):
+  gold_rows = [
+    {"date": date, "close": close}
+    for date, close in zip(gold_dates, gold_prices)
+  ]
+  gold_returns = daily_returns_by_date(gold_rows)
+  correlations = []
+  min_observations = max(20, min(45, days // 3))
+
+  for asset in CORRELATION_ASSETS:
+    try:
+      rows = chart_history(asset["symbol"], days)
+      asset_returns = daily_returns_by_date(rows)
+      shared_dates = sorted(set(gold_returns) & set(asset_returns))
+      if len(shared_dates) < min_observations:
+        continue
+
+      gold_aligned = [gold_returns[date] for date in shared_dates]
+      asset_aligned = [asset_returns[date] for date in shared_dates]
+      corr = pearson_corr(gold_aligned, asset_aligned)
+      if corr is None:
+        continue
+
+      correlations.append({
+        "label": asset["label"],
+        "symbol": asset["symbol"],
+        "corr": round(corr, 3),
+        "observations": len(shared_dates),
+      })
+    except Exception as exc:
+      print(f"[correlation] {asset['symbol']} skipped: {exc}")
+
+  return correlations
+
+
 def build_risk_payload(days):
   data = build_data_payload(days)
   prices = data["prices"]
@@ -421,7 +492,7 @@ def build_risk_payload(days):
     "returns": returns,
     "dd_dates": dates,
     "drawdown": drawdown,
-    "correlations": [],
+    "correlations": build_cross_asset_correlations(dates, prices, days),
   }
 
 
@@ -562,7 +633,11 @@ class AppHandler(SimpleHTTPRequestHandler):
 
   def handle_api(self, parsed):
     params = urllib.parse.parse_qs(parsed.query)
-    days = int(params.get("days", ["180"])[0])
+    try:
+      days = int(params.get("days", ["180"])[0])
+    except (TypeError, ValueError):
+      self.send_json({"error": "days must be an integer between 60 and 365"}, status=400)
+      return
     days = max(60, min(days, 365))
 
     try:

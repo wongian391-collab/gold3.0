@@ -12,12 +12,12 @@
   <header>
     <div class="logo" data-i18n="site_title">Gold Price Analyst</div>
     <div class="header-ticker">
-      <div class="ticker-price" id="header-price">Loading...</div>
-      <div class="ticker-change flat" id="header-change" data-i18n="waiting_data">Waiting for data</div>
+      <div class="ticker-price" id="header-price" aria-live="polite">Loading...</div>
+      <div class="ticker-change flat" id="header-change" data-i18n="waiting_data" aria-live="polite">Waiting for data</div>
     </div>
     <div class="header-meta">
       <div id="header-date">GC=F · COMEX</div>
-      <div id="header-updated">Updating…</div>
+      <div id="header-updated" aria-live="polite">Updating…</div>
     </div>
     <div class="lang-switch" aria-label="Language switcher">
       <button class="lang-btn active" id="lang-en" data-lang="en" type="button">EN</button>
@@ -56,7 +56,7 @@
       </div>
       <div class="controls">
         <span class="control-label" data-i18n="window">Window</span>
-        <input id="days-slider" type="range" min="60" max="365" step="30" value="180">
+        <input id="days-slider" type="range" min="60" max="365" step="30" value="180" aria-label="Analysis window in days">
         <span class="control-label" id="days-label">180d</span>
         <button class="btn-refresh" id="btn-refresh" data-i18n="refresh" type="button">Refresh</button>
       </div>
