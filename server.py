@@ -227,8 +227,45 @@ def chart_history(symbol, required_days, normalize_scaled_gold=False):
   return cache_set(key, rows)
 
 
+def generated_price_history(required_days):
+  key = f"history:fallback:{required_days}"
+  cached = cache_get(key)
+  if cached is not None:
+    return cached
+
+  total_days = max(required_days + 260, 450)
+  end = datetime.now(timezone.utc)
+  rows = []
+  for i in range(total_days):
+    days_back = total_days - i - 1
+    dt = end.replace(hour=0, minute=0, second=0, microsecond=0)
+    dt = datetime.fromtimestamp(dt.timestamp() - days_back * 86400, tz=timezone.utc)
+    long_trend = 2580 + i * 1.25
+    wave = math.sin(i / 8) * 34 + math.cos(i / 19) * 22
+    pullback = -22 * math.sin(i / 5) if i > total_days * 0.78 else 0
+    late_momentum = (i - total_days * 0.9) * 1.8 if i > total_days * 0.9 else 0
+    close = round(long_trend + wave + pullback + late_momentum, 2)
+    intraday = 8 + abs(math.sin(i / 6)) * 18
+    rows.append({
+      "date": dt.strftime("%Y-%m-%d"),
+      "close": close,
+      "open": round(close - math.sin(i / 7) * 9, 2),
+      "high": round(close + intraday, 2),
+      "low": round(close - intraday, 2),
+      "volume": 0,
+      "fallback": True,
+    })
+
+  return cache_set(key, rows)
+
+
 def price_history(required_days):
-  history = chart_history("GC=F", required_days, normalize_scaled_gold=True)
+  try:
+    history = chart_history("GC=F", required_days, normalize_scaled_gold=True)
+  except Exception as exc:
+    print(f"[fallback] using generated gold data: {exc}")
+    history = generated_price_history(required_days)
+
   if len(history) < max(required_days, 210):
     raise ValueError("Not enough historical price data returned")
   return history
@@ -320,6 +357,7 @@ def build_data_payload(days):
     "period_high": max(prices),
     "period_low": min(prices),
     "period_avg": mean(prices),
+    "fallback": bool(latest_row.get("fallback")),
   }
 
 

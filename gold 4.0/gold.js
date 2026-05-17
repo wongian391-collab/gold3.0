@@ -431,14 +431,27 @@ function apiFetch(url) {
   // Return the same Promise for identical URLs so multiple callers share one request
   if (!_fetch[url]) {
     _fetch[url] = fetch(url)
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
+      .then(async r => {
+        const payload = await r.json().catch(() => null);
+        if (!r.ok) {
+          const err = new Error(payload?.error || `HTTP ${r.status}`);
+          err.status = r.status;
+          throw err;
+        }
+        return payload;
       })
       .catch(err => {
-        if (ALLOW_MOCK_DATA) {
+        const canUseFallback = ALLOW_MOCK_DATA ||
+          err.status === 502 ||
+          /too many requests|upstream fetch failed/i.test(err.message || '');
+
+        if (canUseFallback) {
           DEMO_MODE.enabled = true;
-          return getMockPayload(url);
+          return {
+            ...getMockPayload(url),
+            fallback: true,
+            upstream_error: err.message || 'Upstream data unavailable',
+          };
         }
         return { error: err.message || 'Data fetch failed' };
       });
