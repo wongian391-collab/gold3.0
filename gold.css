@@ -234,6 +234,74 @@ header {
 .market-move.down { color: var(--red); }
 .market-card.loading .market-price { color: var(--muted); }
 
+.market-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.market-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.market-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.market-section-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.market-section-sub {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.market-section-stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.market-pill {
+  min-width: 110px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.market-pill-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.market-pill-value {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.market-pill-value.up { color: var(--green); }
+.market-pill-value.down { color: var(--red); }
+
+.market-k-chart {
+  min-height: 420px;
+}
+
 /* ── Tab Bar ───────────────────────────────────────────────────── */
 .tab-bar {
   display: flex;
@@ -488,6 +556,8 @@ input[type="range"] {
   .container       { padding: 16px; }
   .summary-bar     { grid-template-columns: repeat(2, 1fr); }
   .market-grid     { grid-template-columns: repeat(2, 1fr); }
+  .market-section-head { flex-direction: column; }
+  .market-section-stats { justify-content: flex-start; }
   .metrics         { grid-template-columns: repeat(2, 1fr); }
   .two-col         { grid-template-columns: 1fr; }
   .sentiment-top   { grid-template-columns: 1fr; }
@@ -506,6 +576,8 @@ input[type="range"] {
   .market-grid     { grid-template-columns: 1fr; }
   .market-watch-head { flex-direction: column; }
   .market-watch-meta { text-align: left; }
+  .market-section { padding: 14px; }
+  .market-pill { flex: 1 1 130px; }
   .metrics         { grid-template-columns: 1fr; }
   .stat-card,
   .market-card,

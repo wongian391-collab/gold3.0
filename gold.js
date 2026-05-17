@@ -26,7 +26,10 @@ const I18N = {
     tab_patterns: 'Patterns',
     tab_sentiment: 'Sentiment',
     tab_backtest: 'Backtest',
+    tab_markets: 'Markets',
     tab_risk: 'Risk',
+    k_line_chart: 'K-line Chart',
+    latest_price: 'Latest',
     window: 'Window',
     refresh: 'Refresh',
     awaiting_data: 'Awaiting data',
@@ -96,7 +99,10 @@ const I18N = {
     tab_patterns: '走势形态',
     tab_sentiment: '情绪分析',
     tab_backtest: '回测',
+    tab_markets: '市场',
     tab_risk: '风险',
+    k_line_chart: 'K线图',
+    latest_price: '最新价',
     window: '区间',
     refresh: '刷新',
     awaiting_data: '等待数据中',
@@ -426,25 +432,38 @@ function buildMockData(windowDays) {
       last_updated: new Date().toISOString(),
       fallback: true,
       assets: [
-        mockMarketAsset('S&P 500', '^GSPC', 'index', 5200, 0.55, windowDays),
-        mockMarketAsset('Vanguard VOO', 'VOO', 'USD', 500, 0.5, windowDays),
-        mockMarketAsset('WTI Crude', 'CL=F', 'USD/bbl', 78, -0.18, windowDays),
-        mockMarketAsset('Silver', 'SI=F', 'USD/oz', 31, 0.36, windowDays),
+        mockMarketAsset('S&P 500', '^GSPC', 'index', 5200, 0.55, windowDays, 0),
+        mockMarketAsset('Vanguard VOO', 'VOO', 'USD', 500, 0.5, windowDays, 1.4),
+        mockMarketAsset('WTI Crude', 'CL=F', 'USD/bbl', 78, -0.18, windowDays, 2.6),
+        mockMarketAsset('Silver', 'SI=F', 'USD/oz', 31, 0.36, windowDays, 3.8),
       ],
     },
   };
 }
 
-function mockMarketAsset(label, symbol, unit, base, slope, windowDays) {
-  const wave = Math.sin(windowDays / 17 + base) * base * 0.018;
-  const prevWave = Math.sin((windowDays - 1) / 17 + base) * base * 0.018;
-  const first = base;
-  const prev = base + slope * (windowDays - 1) + prevWave;
-  const price = base + slope * windowDays + wave;
+function mockMarketAsset(label, symbol, unit, base, slope, windowDays, phase) {
+  const end = todayUtcDate();
+  const dates = Array.from({ length: windowDays }, (_, i) => {
+    const d = new Date(end);
+    d.setUTCDate(end.getUTCDate() - windowDays + i + 1);
+    return d.toISOString().slice(0, 10);
+  });
+  const close = dates.map((_, i) => Number((base + slope * i + Math.sin(i / 13 + phase) * base * 0.018 + Math.cos(i / 27 + phase) * base * 0.01).toFixed(4)));
+  const open = close.map((value, i) => Number((value - Math.sin(i / 5 + phase) * base * 0.004).toFixed(4)));
+  const high = close.map((value, i) => Number((Math.max(value, open[i]) + base * 0.006).toFixed(4)));
+  const low = close.map((value, i) => Number((Math.min(value, open[i]) - base * 0.006).toFixed(4)));
+  const first = close[0];
+  const prev = close.at(-2);
+  const price = close.at(-1);
   return {
     label,
     symbol,
     unit,
+    dates,
+    open,
+    high,
+    low,
+    close,
     price,
     daily_change: price - prev,
     daily_pct_change: ((price / prev) - 1) * 100,
@@ -681,7 +700,7 @@ function loadTab(tab) {
   if (loaded.has(key)) return;
   loaded.add(key);
   ({ patterns: loadPatterns, sentiment: loadSentiment,
-     backtest: loadBacktest, risk: loadRisk })[tab]?.();
+     backtest: loadBacktest, markets: loadMarketCharts, risk: loadRisk })[tab]?.();
 }
 
 // ── Slider ────────────────────────────────────────────────────────
@@ -820,6 +839,80 @@ async function loadMarkets() {
       <div class="market-price">${e.message || t('waiting_data')}</div>
     </article>`;
     setText('market-watch-updated', t('waiting_data'));
+  }
+}
+
+async function loadMarketCharts() {
+  const container = $id('market-sections');
+  if (!container) return;
+
+  try {
+    const d = await apiFetch(`/api/markets?days=${days}`);
+    if (d.error) throw new Error(d.error);
+
+    container.innerHTML = d.assets.map((asset, index) => `
+      <section class="market-section">
+        <div class="market-section-head">
+          <div>
+            <h2 class="market-section-title">${asset.label}</h2>
+            <div class="market-section-sub">${asset.symbol} · ${t('k_line_chart')} · ${asset.market_date}</div>
+          </div>
+          <div class="market-section-stats">
+            <div class="market-pill">
+              <div class="market-pill-label">${t('latest_price')}</div>
+              <div class="market-pill-value">${fmtMarketPrice(asset)}</div>
+            </div>
+            <div class="market-pill">
+              <div class="market-pill-label">Daily</div>
+              <div class="market-pill-value ${moveClass(asset.daily_change)}">${fmtPct(asset.daily_pct_change)}</div>
+            </div>
+            <div class="market-pill">
+              <div class="market-pill-label">${days}d</div>
+              <div class="market-pill-value ${moveClass(asset.window_change)}">${fmtPct(asset.window_pct_change)}</div>
+            </div>
+          </div>
+        </div>
+        <div class="market-k-chart" id="market-k-${index}"></div>
+      </section>
+    `).join('');
+
+    d.assets.forEach((asset, index) => {
+      const ma20 = sma(asset.close, 20);
+      const ma50 = sma(asset.close, 50);
+      renderPlot(`market-k-${index}`, [
+        {
+          type: 'candlestick',
+          x: asset.dates,
+          open: asset.open,
+          high: asset.high,
+          low: asset.low,
+          close: asset.close,
+          name: asset.label,
+          increasing: { line: { color: '#22c55e' }, fillcolor: '#22c55e' },
+          decreasing: { line: { color: '#ef4444' }, fillcolor: '#ef4444' },
+        },
+        {
+          x: asset.dates,
+          y: ma20,
+          name: 'MA-20',
+          line: { color: '#60A5FA', width: 1.2 },
+        },
+        {
+          x: asset.dates,
+          y: ma50,
+          name: 'MA-50',
+          line: { color: '#F97316', width: 1.2, dash: 'dash' },
+        },
+      ], plyLayout({
+        height: 440,
+        margin: { l: 58, r: 20, t: 18, b: 40 },
+        xaxis: { gridcolor: '#334155', linecolor: '#334155', rangeslider: { visible: false } },
+        yaxis: { title: asset.unit, gridcolor: '#334155' },
+      }));
+    });
+  } catch (e) {
+    console.error('market charts:', e);
+    container.innerHTML = `<div class="chart-box"><div class="spinner-wrap" style="color:#ef4444">Error: ${e.message}</div></div>`;
   }
 }
 
