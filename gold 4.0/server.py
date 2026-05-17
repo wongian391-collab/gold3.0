@@ -20,7 +20,8 @@ CACHE_TTL_SECONDS = 60
 USER_AGENT = "GoldPriceAnalyst/1.0"
 FULL_HISTORY_DAYS = 10000
 NEWS_FEED = "https://news.google.com/rss/search?q=gold+price&hl=en-US&gl=US&ceid=US:en"
-YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_spec}&interval=1d&includePrePost=false&events=div%2Csplits"
+YAHOO_CHART_RANGE = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_spec}&interval=1d&includePrePost=false&events=div%2Csplits"
+YAHOO_CHART_PERIOD = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1=0&period2={period2}&interval=1d&includePrePost=false&events=div%2Csplits"
 CORRELATION_ASSETS = [
   {"label": "DXY", "symbol": "DX-Y.NYB"},
   {"label": "Silver", "symbol": "SI=F"},
@@ -195,10 +196,12 @@ def chart_history(symbol, required_days, normalize_scaled_gold=False):
   if cached is not None:
     return cached
 
-  range_days = max(required_days + 260, 450)
-  range_spec = "max" if required_days >= FULL_HISTORY_DAYS else f"{range_days}d"
   encoded_symbol = urllib.parse.quote(symbol, safe="")
-  payload = fetch_json(YAHOO_CHART.format(symbol=encoded_symbol, range_spec=range_spec))
+  if required_days >= FULL_HISTORY_DAYS:
+    payload = fetch_json(YAHOO_CHART_PERIOD.format(symbol=encoded_symbol, period2=int(time.time())))
+  else:
+    range_days = max(required_days + 260, 450)
+    payload = fetch_json(YAHOO_CHART_RANGE.format(symbol=encoded_symbol, range_spec=f"{range_days}d"))
   result = payload["chart"]["result"][0]
   quote = result["indicators"]["quote"][0]
   timestamps = result.get("timestamp", [])
