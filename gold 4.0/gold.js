@@ -1,7 +1,8 @@
 /* Gold Price Analyst — Frontend */
 
 // ── State ─────────────────────────────────────────────────────────
-let days     = 180;
+const ALL_HISTORY_DAYS = 10000;
+let days     = ALL_HISTORY_DAYS;
 const loaded = new Set();       // tracks "tab:days" combos already rendered
 const _fetch = {};              // deduplicates in-flight / completed fetches
 const DEMO_MODE = { enabled: false };
@@ -22,7 +23,7 @@ const I18N = {
     market_watch: 'Cross-Market Watch',
     market_watch_title: 'Gold context',
     market_daily: value => `Daily ${value}`,
-    market_window_move: value => `${days}d ${value}`,
+    market_window_move: value => `${windowLabel()} ${value}`,
     tab_patterns: 'Patterns',
     tab_sentiment: 'Sentiment',
     tab_backtest: 'Backtest',
@@ -49,7 +50,7 @@ const I18N = {
     full_volatility: 'Full Volatility',
     volatility_30d: '30D Volatility',
     disclaimer: 'Live COMEX gold data is served through the local API, with fallback only if the upstream source is unavailable.',
-    market_window: (days, date) => `GC=F · COMEX · ${days}d window · market date ${date}`,
+    market_window: (days, date) => `GC=F · COMEX · ${windowLabel(days)} window · market date ${date}`,
     last_checked: value => `Last checked ${value}`,
     daily_prefix: value => `Daily: ${value}`,
     overbought: 'Overbought ↑',
@@ -95,7 +96,7 @@ const I18N = {
     market_watch: '跨市场观察',
     market_watch_title: '黄金相关市场',
     market_daily: value => `单日 ${value}`,
-    market_window_move: value => `${days}天 ${value}`,
+    market_window_move: value => `${windowLabel()} ${value}`,
     tab_patterns: '走势形态',
     tab_sentiment: '情绪分析',
     tab_backtest: '回测',
@@ -122,7 +123,7 @@ const I18N = {
     full_volatility: '整体波动率',
     volatility_30d: '30日波动率',
     disclaimer: '实时 COMEX 黄金数据通过本地 API 提供；仅在上游数据源不可用时才会回退。',
-    market_window: (days, date) => `GC=F · COMEX · ${days}天区间 · 市场日期 ${date}`,
+    market_window: (days, date) => `GC=F · COMEX · ${windowLabel(days)}区间 · 市场日期 ${date}`,
     last_checked: value => `上次检查 ${value}`,
     daily_prefix: value => `单日: ${value}`,
     overbought: '超买 ↑',
@@ -550,6 +551,7 @@ const fmtUSD = n => '$' + fmtN(n);
 const fmtPct = n => (n >= 0 ? '+' : '') + fmtN(n) + '%';
 const sign   = n => n >= 0 ? 'bull' : 'bear';
 const moveClass = n => n > 0 ? 'up' : n < 0 ? 'down' : 'flat';
+const windowLabel = (value = days) => value >= ALL_HISTORY_DAYS ? 'All' : `${value}d`;
 const fmtMarketPrice = asset => {
   if (asset.unit === 'index') return fmtN(asset.price);
   if (asset.unit === 'USD/bbl') return `${fmtUSD(asset.price)} / bbl`;
@@ -720,10 +722,11 @@ function initControls() {
   const refreshBtn = $id('btn-refresh');
 
   if (slider && dLabel) {
-    dLabel.textContent = slider.value + 'd';
-    slider.addEventListener('input', () => { dLabel.textContent = slider.value + 'd'; });
+    dLabel.textContent = windowLabel(Number(slider.value));
+    slider.addEventListener('input', () => { dLabel.textContent = windowLabel(Number(slider.value)); });
     slider.addEventListener('change', () => {
       days = parseInt(slider.value, 10);
+      dLabel.textContent = windowLabel(days);
       refreshAll();
     });
   }
@@ -890,7 +893,7 @@ function normalizeMarketSeries(asset) {
   const price = Number(asset.price) || 0;
   const prev = price - (Number(asset.daily_change) || 0);
   const first = price - (Number(asset.window_change) || 0);
-  const pointCount = Math.max(30, Math.min(days, 365));
+  const pointCount = Math.max(30, Math.min(days, 1000));
   const end = asset.market_date ? new Date(`${asset.market_date}T00:00:00Z`) : todayUtcDate();
   const symbolSeed = String(asset.symbol || asset.label || '').split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
 
@@ -944,7 +947,7 @@ async function loadMarketCharts() {
               <div class="market-pill-value ${moveClass(asset.daily_change)}">${fmtPct(asset.daily_pct_change)}</div>
             </div>
             <div class="market-pill">
-              <div class="market-pill-label">${days}d</div>
+              <div class="market-pill-label">${windowLabel()}</div>
               <div class="market-pill-value ${moveClass(asset.window_change)}">${fmtPct(asset.window_pct_change)}</div>
             </div>
           </div>

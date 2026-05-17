@@ -18,8 +18,9 @@ PORT = int(os.environ.get("PORT", "8080"))
 ROOT = Path(__file__).resolve().parent
 CACHE_TTL_SECONDS = 60
 USER_AGENT = "GoldPriceAnalyst/1.0"
+FULL_HISTORY_DAYS = 10000
 NEWS_FEED = "https://news.google.com/rss/search?q=gold+price&hl=en-US&gl=US&ceid=US:en"
-YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_days}d&interval=1d&includePrePost=false&events=div%2Csplits"
+YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_spec}&interval=1d&includePrePost=false&events=div%2Csplits"
 CORRELATION_ASSETS = [
   {"label": "DXY", "symbol": "DX-Y.NYB"},
   {"label": "Silver", "symbol": "SI=F"},
@@ -195,8 +196,9 @@ def chart_history(symbol, required_days, normalize_scaled_gold=False):
     return cached
 
   range_days = max(required_days + 260, 450)
+  range_spec = "max" if required_days >= FULL_HISTORY_DAYS else f"{range_days}d"
   encoded_symbol = urllib.parse.quote(symbol, safe="")
-  payload = fetch_json(YAHOO_CHART.format(symbol=encoded_symbol, range_days=range_days))
+  payload = fetch_json(YAHOO_CHART.format(symbol=encoded_symbol, range_spec=range_spec))
   result = payload["chart"]["result"][0]
   quote = result["indicators"]["quote"][0]
   timestamps = result.get("timestamp", [])
@@ -221,7 +223,8 @@ def chart_history(symbol, required_days, normalize_scaled_gold=False):
       "volume": int(volumes[idx]) if volumes[idx] is not None else 0,
     })
 
-  if len(rows) < max(required_days, 30):
+  min_required = 30 if required_days >= FULL_HISTORY_DAYS else max(required_days, 30)
+  if len(rows) < min_required:
     raise ValueError(f"Not enough historical data returned for {symbol}")
 
   median_close = statistics.median(row["close"] for row in rows)
@@ -324,7 +327,8 @@ def price_history(required_days):
     print(f"[fallback] using generated gold data: {exc}")
     history = generated_price_history(required_days)
 
-  if len(history) < max(required_days, 210):
+  min_required = 210 if required_days >= FULL_HISTORY_DAYS else max(required_days, 210)
+  if len(history) < min_required:
     raise ValueError("Not enough historical price data returned")
   return history
 
@@ -769,11 +773,11 @@ class AppHandler(SimpleHTTPRequestHandler):
   def handle_api(self, parsed):
     params = urllib.parse.parse_qs(parsed.query)
     try:
-      days = int(params.get("days", ["180"])[0])
+      days = int(params.get("days", [str(FULL_HISTORY_DAYS)])[0])
     except (TypeError, ValueError):
-      self.send_json({"error": "days must be an integer between 60 and 365"}, status=400)
+      self.send_json({"error": f"days must be an integer between 60 and {FULL_HISTORY_DAYS}"}, status=400)
       return
-    days = max(60, min(days, 365))
+    days = max(60, min(days, FULL_HISTORY_DAYS))
 
     try:
       if parsed.path == "/api/data":
