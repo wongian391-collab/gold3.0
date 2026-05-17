@@ -675,11 +675,7 @@ function buildClientSentimentFallback() {
 function initTabs() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      $id('tab-' + btn.dataset.tab)?.classList.add('active');
-      loadTab(btn.dataset.tab);
+      activateTab(btn.dataset.tab);
     });
   });
 }
@@ -701,6 +697,20 @@ function loadTab(tab) {
   loaded.add(key);
   ({ patterns: loadPatterns, sentiment: loadSentiment,
      backtest: loadBacktest, markets: loadMarketCharts, risk: loadRisk })[tab]?.();
+}
+
+function activateTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.id === 'tab-' + tab);
+  });
+  loadTab(tab);
+}
+
+function marketSlug(symbol) {
+  return symbol.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
 }
 
 // ── Slider ────────────────────────────────────────────────────────
@@ -733,6 +743,19 @@ function refreshAll() {
   loadMarkets();
   const active = document.querySelector('.tab-btn.active')?.dataset.tab;
   if (active) loadTab(active);
+}
+
+async function openMarketSection(symbol) {
+  const slug = symbol.includes('-') || /^[a-z0-9]+$/i.test(symbol) ? symbol.toLowerCase() : marketSlug(symbol);
+  activateTab('markets');
+  await loadMarketCharts();
+  const target = $id(`market-section-${slug}`);
+  if (target) {
+    window.history.replaceState(null, '', `#market-${slug}`);
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.classList.add('market-section-focus');
+    window.setTimeout(() => target.classList.remove('market-section-focus'), 1200);
+  }
 }
 
 function scheduleMidnightRefresh() {
@@ -817,7 +840,7 @@ async function loadMarkets() {
       const dailyClass = moveClass(asset.daily_change);
       const windowClass = moveClass(asset.window_change);
       return `
-        <article class="market-card">
+        <button class="market-card market-card-link" type="button" data-market-symbol="${asset.symbol}">
           <div class="market-name">
             <span>${asset.label}</span>
             <span class="market-symbol">${asset.symbol}</span>
@@ -827,8 +850,12 @@ async function loadMarkets() {
             <div class="market-move ${dailyClass}">${t('market_daily', fmtPct(asset.daily_pct_change))}</div>
             <div class="market-move ${windowClass}">${t('market_window_move', fmtPct(asset.window_pct_change))}</div>
           </div>
-        </article>`;
+        </button>`;
     }).join('');
+
+    grid.querySelectorAll('[data-market-symbol]').forEach(card => {
+      card.addEventListener('click', () => openMarketSection(card.dataset.marketSymbol));
+    });
 
     const suffix = d.fallback ? ` · ${t('derived_market_action')}` : '';
     setText('market-watch-updated', `${t('last_checked', fmtLocalTime(d.last_updated))}${suffix}`);
@@ -851,7 +878,7 @@ async function loadMarketCharts() {
     if (d.error) throw new Error(d.error);
 
     container.innerHTML = d.assets.map((asset, index) => `
-      <section class="market-section">
+      <section class="market-section" id="market-section-${marketSlug(asset.symbol)}">
         <div class="market-section-head">
           <div>
             <h2 class="market-section-title">${asset.label}</h2>
@@ -1250,6 +1277,10 @@ function initGoldApp() {
   loadHeader();
   loadMarkets();
   loadTab(document.querySelector('.tab-btn.active')?.dataset.tab || 'patterns');
+
+  if (window.location.hash.startsWith('#market-')) {
+    window.setTimeout(() => openMarketSection(window.location.hash.replace('#market-', '')), 250);
+  }
 }
 
 if (document.readyState === 'loading') {
