@@ -835,8 +835,10 @@ async function loadMarkets() {
   try {
     const d = await apiFetch(`/api/markets?days=${days}`);
     if (d.error) throw new Error(d.error);
+    const assets = Array.isArray(d.assets) ? d.assets : [];
+    if (!assets.length) throw new Error('No market data returned');
 
-    grid.innerHTML = d.assets.map(asset => {
+    grid.innerHTML = assets.map(asset => {
       const dailyClass = moveClass(asset.daily_change);
       const windowClass = moveClass(asset.window_change);
       return `
@@ -869,6 +871,30 @@ async function loadMarkets() {
   }
 }
 
+function normalizeMarketSeries(asset) {
+  if (
+    Array.isArray(asset.dates) &&
+    Array.isArray(asset.open) &&
+    Array.isArray(asset.high) &&
+    Array.isArray(asset.low) &&
+    Array.isArray(asset.close) &&
+    asset.close.length
+  ) {
+    return asset;
+  }
+
+  const price = Number(asset.price) || 0;
+  const prev = price - (Number(asset.daily_change) || 0);
+  const first = price - (Number(asset.window_change) || 0);
+  const dates = ['Start', 'Previous', asset.market_date || 'Latest'];
+  const open = [first, first, prev];
+  const close = [first, prev, price];
+  const high = close.map((value, i) => Math.max(value, open[i]));
+  const low = close.map((value, i) => Math.min(value, open[i]));
+
+  return { ...asset, dates, open, high, low, close, synthetic: true };
+}
+
 async function loadMarketCharts() {
   const container = $id('market-sections');
   if (!container) return;
@@ -876,8 +902,10 @@ async function loadMarketCharts() {
   try {
     const d = await apiFetch(`/api/markets?days=${days}`);
     if (d.error) throw new Error(d.error);
+    const assets = (Array.isArray(d.assets) ? d.assets : []).map(normalizeMarketSeries);
+    if (!assets.length) throw new Error('No market data returned');
 
-    container.innerHTML = d.assets.map((asset, index) => `
+    container.innerHTML = assets.map((asset, index) => `
       <section class="market-section" id="market-section-${marketSlug(asset.symbol)}">
         <div class="market-section-head">
           <div>
@@ -903,7 +931,7 @@ async function loadMarketCharts() {
       </section>
     `).join('');
 
-    d.assets.forEach((asset, index) => {
+    assets.forEach((asset, index) => {
       const ma20 = sma(asset.close, 20);
       const ma50 = sma(asset.close, 50);
       renderPlot(`market-k-${index}`, [
