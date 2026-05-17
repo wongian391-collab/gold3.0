@@ -878,7 +878,11 @@ function normalizeMarketSeries(asset) {
     Array.isArray(asset.high) &&
     Array.isArray(asset.low) &&
     Array.isArray(asset.close) &&
-    asset.close.length
+    asset.dates.length >= 10 &&
+    asset.close.length >= 10 &&
+    asset.open.length === asset.close.length &&
+    asset.high.length === asset.close.length &&
+    asset.low.length === asset.close.length
   ) {
     return asset;
   }
@@ -954,10 +958,13 @@ async function loadMarketCharts() {
       const ma50 = sma(asset.close, 50);
       renderPlot(`market-k-${index}`, [
         {
+          type: 'scatter',
+          mode: 'lines',
           x: asset.dates,
           name: asset.label,
           y: asset.close,
-          line: { color: '#FFD700', width: 2 },
+          line: { color: '#FFD700', width: 2.4, shape: 'spline' },
+          connectgaps: true,
           hovertemplate: '%{x}<br>%{y:.2f}<extra></extra>',
         },
         {
