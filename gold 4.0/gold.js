@@ -936,15 +936,11 @@ async function loadMarketCharts() {
       const ma50 = sma(asset.close, 50);
       renderPlot(`market-k-${index}`, [
         {
-          type: 'candlestick',
           x: asset.dates,
-          open: asset.open,
-          high: asset.high,
-          low: asset.low,
-          close: asset.close,
           name: asset.label,
-          increasing: { line: { color: '#22c55e' }, fillcolor: '#22c55e' },
-          decreasing: { line: { color: '#ef4444' }, fillcolor: '#ef4444' },
+          y: asset.close,
+          line: { color: '#FFD700', width: 2 },
+          hovertemplate: '%{x}<br>%{y:.2f}<extra></extra>',
         },
         {
           x: asset.dates,
@@ -961,7 +957,7 @@ async function loadMarketCharts() {
       ], plyLayout({
         height: 440,
         margin: { l: 58, r: 20, t: 18, b: 40 },
-        xaxis: { gridcolor: '#334155', linecolor: '#334155', rangeslider: { visible: false } },
+        xaxis: { gridcolor: '#334155', linecolor: '#334155' },
         yaxis: { title: asset.unit, gridcolor: '#334155' },
       }));
     });
