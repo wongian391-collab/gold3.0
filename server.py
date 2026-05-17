@@ -24,7 +24,15 @@ CORRELATION_ASSETS = [
   {"label": "DXY", "symbol": "DX-Y.NYB"},
   {"label": "Silver", "symbol": "SI=F"},
   {"label": "S&P 500", "symbol": "^GSPC"},
+  {"label": "Vanguard VOO", "symbol": "VOO"},
+  {"label": "WTI Crude", "symbol": "CL=F"},
   {"label": "UST 10Y", "symbol": "^TNX"},
+]
+MARKET_ASSETS = [
+  {"label": "S&P 500", "symbol": "^GSPC", "unit": "index"},
+  {"label": "Vanguard VOO", "symbol": "VOO", "unit": "USD"},
+  {"label": "WTI Crude", "symbol": "CL=F", "unit": "USD/bbl"},
+  {"label": "Silver", "symbol": "SI=F", "unit": "USD/oz"},
 ]
 
 _CACHE = {}
@@ -259,6 +267,56 @@ def generated_price_history(required_days):
   return cache_set(key, rows)
 
 
+def generated_asset_history(symbol, required_days):
+  key = f"history:fallback:{symbol}:{required_days}"
+  cached = cache_get(key)
+  if cached is not None:
+    return cached
+
+  baselines = {
+    "^GSPC": 5200,
+    "VOO": 500,
+    "CL=F": 78,
+    "SI=F": 31,
+    "DX-Y.NYB": 104,
+    "^TNX": 4.2,
+  }
+  base = baselines.get(symbol, 100)
+  symbol_seed = sum(ord(ch) for ch in symbol)
+  total_days = max(required_days + 8, 90)
+  end = datetime.now(timezone.utc)
+  rows = []
+
+  for i in range(total_days):
+    days_back = total_days - i - 1
+    dt = end.replace(hour=0, minute=0, second=0, microsecond=0)
+    dt = datetime.fromtimestamp(dt.timestamp() - days_back * 86400, tz=timezone.utc)
+    drift = base * 0.00045 * i
+    wave = math.sin((i + symbol_seed) / 9) * base * 0.018
+    counter = math.cos((i + symbol_seed) / 21) * base * 0.011
+    close = round(base + drift + wave + counter, 4)
+    spread = max(base * 0.004, abs(close) * 0.003)
+    rows.append({
+      "date": dt.strftime("%Y-%m-%d"),
+      "close": close,
+      "open": round(close - math.sin(i / 5) * spread, 4),
+      "high": round(close + spread, 4),
+      "low": round(close - spread, 4),
+      "volume": 0,
+      "fallback": True,
+    })
+
+  return cache_set(key, rows)
+
+
+def market_history(symbol, required_days):
+  try:
+    return chart_history(symbol, required_days)
+  except Exception as exc:
+    print(f"[fallback] using generated {symbol} data: {exc}")
+    return generated_asset_history(symbol, required_days)
+
+
 def price_history(required_days):
   try:
     history = chart_history("GC=F", required_days, normalize_scaled_gold=True)
@@ -269,6 +327,40 @@ def price_history(required_days):
   if len(history) < max(required_days, 210):
     raise ValueError("Not enough historical price data returned")
   return history
+
+
+def build_markets_payload(days):
+  assets = []
+  for asset in MARKET_ASSETS:
+    rows = market_history(asset["symbol"], days)
+    recent = rows[-days:] if len(rows) >= days else rows
+    if len(recent) < 2:
+      continue
+
+    last = recent[-1]
+    prev = recent[-2]
+    first = recent[0]
+    price = last["close"]
+    prev_price = prev["close"]
+    first_price = first["close"]
+    assets.append({
+      "label": asset["label"],
+      "symbol": asset["symbol"],
+      "unit": asset["unit"],
+      "price": price,
+      "daily_change": price - prev_price,
+      "daily_pct_change": ((price / prev_price) - 1) * 100 if prev_price else 0,
+      "window_change": price - first_price,
+      "window_pct_change": ((price / first_price) - 1) * 100 if first_price else 0,
+      "market_date": last["date"],
+      "fallback": bool(last.get("fallback")),
+    })
+
+  return {
+    "assets": assets,
+    "last_updated": datetime.now(timezone.utc).isoformat(),
+    "fallback": any(asset["fallback"] for asset in assets),
+  }
 
 
 def nearest_levels(prices, last_price):
@@ -685,6 +777,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         payload = build_backtest_payload(days)
       elif parsed.path == "/api/risk":
         payload = build_risk_payload(days)
+      elif parsed.path == "/api/markets":
+        payload = build_markets_payload(days)
       elif parsed.path == "/api/sentiment":
         payload = build_sentiment_payload()
       else:

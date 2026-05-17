@@ -19,6 +19,10 @@ const I18N = {
     window_change: 'Window Change',
     period_high: 'Period High',
     period_low: 'Period Low',
+    market_watch: 'Cross-Market Watch',
+    market_watch_title: 'Gold context',
+    market_daily: value => `Daily ${value}`,
+    market_window_move: value => `${days}d ${value}`,
     tab_patterns: 'Patterns',
     tab_sentiment: 'Sentiment',
     tab_backtest: 'Backtest',
@@ -85,6 +89,10 @@ const I18N = {
     window_change: '区间变化',
     period_high: '区间高点',
     period_low: '区间低点',
+    market_watch: '跨市场观察',
+    market_watch_title: '黄金相关市场',
+    market_daily: value => `单日 ${value}`,
+    market_window_move: value => `${days}天 ${value}`,
     tab_patterns: '走势形态',
     tab_sentiment: '情绪分析',
     tab_backtest: '回测',
@@ -409,9 +417,41 @@ function buildMockData(windowDays) {
         { label: 'DXY', corr: Number((-0.42 - pseudoCorr * 0.2).toFixed(3)) },
         { label: 'Silver', corr: Number((0.68 + pseudoCorr * 0.15).toFixed(3)) },
         { label: 'S&P 500', corr: Number((0.18 + pseudoCorr * 0.1).toFixed(3)) },
+        { label: 'Vanguard VOO', corr: Number((0.2 + pseudoCorr * 0.08).toFixed(3)) },
+        { label: 'WTI Crude', corr: Number((0.12 - pseudoCorr * 0.1).toFixed(3)) },
         { label: 'UST 10Y', corr: Number((-0.27 + pseudoCorr * 0.12).toFixed(3)) },
       ],
     },
+    markets: {
+      last_updated: new Date().toISOString(),
+      fallback: true,
+      assets: [
+        mockMarketAsset('S&P 500', '^GSPC', 'index', 5200, 0.55, windowDays),
+        mockMarketAsset('Vanguard VOO', 'VOO', 'USD', 500, 0.5, windowDays),
+        mockMarketAsset('WTI Crude', 'CL=F', 'USD/bbl', 78, -0.18, windowDays),
+        mockMarketAsset('Silver', 'SI=F', 'USD/oz', 31, 0.36, windowDays),
+      ],
+    },
+  };
+}
+
+function mockMarketAsset(label, symbol, unit, base, slope, windowDays) {
+  const wave = Math.sin(windowDays / 17 + base) * base * 0.018;
+  const prevWave = Math.sin((windowDays - 1) / 17 + base) * base * 0.018;
+  const first = base;
+  const prev = base + slope * (windowDays - 1) + prevWave;
+  const price = base + slope * windowDays + wave;
+  return {
+    label,
+    symbol,
+    unit,
+    price,
+    daily_change: price - prev,
+    daily_pct_change: ((price / prev) - 1) * 100,
+    window_change: price - first,
+    window_pct_change: ((price / first) - 1) * 100,
+    market_date: todayUtcDate().toISOString().slice(0, 10),
+    fallback: true,
   };
 }
 
@@ -424,6 +464,7 @@ function getMockPayload(url) {
   if (parsed.pathname === '/api/sentiment') return mock.sentiment;
   if (parsed.pathname === '/api/backtest') return mock.backtest;
   if (parsed.pathname === '/api/risk') return mock.risk;
+  if (parsed.pathname === '/api/markets') return mock.markets;
   return { error: 'Unknown mock endpoint' };
 }
 
@@ -490,6 +531,12 @@ const fmtUSD = n => '$' + fmtN(n);
 const fmtPct = n => (n >= 0 ? '+' : '') + fmtN(n) + '%';
 const sign   = n => n >= 0 ? 'bull' : 'bear';
 const moveClass = n => n > 0 ? 'up' : n < 0 ? 'down' : 'flat';
+const fmtMarketPrice = asset => {
+  if (asset.unit === 'index') return fmtN(asset.price);
+  if (asset.unit === 'USD/bbl') return `${fmtUSD(asset.price)} / bbl`;
+  if (asset.unit === 'USD/oz') return `${fmtUSD(asset.price)} / oz`;
+  return fmtUSD(asset.price);
+};
 const t = (key, ...args) => {
   const value = I18N[currentLang]?.[key] ?? I18N.en[key] ?? key;
   return typeof value === 'function' ? value(...args) : value;
@@ -664,6 +711,7 @@ function refreshAll() {
   invalidateCache();
   loaded.clear();
   loadHeader();
+  loadMarkets();
   const active = document.querySelector('.tab-btn.active')?.dataset.tab;
   if (active) loadTab(active);
 }
@@ -735,6 +783,43 @@ async function loadHeader() {
       chEl.className = 'ticker-change flat';
     }
     setText('header-updated', t('waiting_data'));
+  }
+}
+
+async function loadMarkets() {
+  const grid = $id('market-grid');
+  if (!grid) return;
+
+  try {
+    const d = await apiFetch(`/api/markets?days=${days}`);
+    if (d.error) throw new Error(d.error);
+
+    grid.innerHTML = d.assets.map(asset => {
+      const dailyClass = moveClass(asset.daily_change);
+      const windowClass = moveClass(asset.window_change);
+      return `
+        <article class="market-card">
+          <div class="market-name">
+            <span>${asset.label}</span>
+            <span class="market-symbol">${asset.symbol}</span>
+          </div>
+          <div class="market-price">${fmtMarketPrice(asset)}</div>
+          <div class="market-moves">
+            <div class="market-move ${dailyClass}">${t('market_daily', fmtPct(asset.daily_pct_change))}</div>
+            <div class="market-move ${windowClass}">${t('market_window_move', fmtPct(asset.window_pct_change))}</div>
+          </div>
+        </article>`;
+    }).join('');
+
+    const suffix = d.fallback ? ` · ${t('derived_market_action')}` : '';
+    setText('market-watch-updated', `${t('last_checked', fmtLocalTime(d.last_updated))}${suffix}`);
+  } catch (e) {
+    console.error('markets:', e);
+    grid.innerHTML = `<article class="market-card loading">
+      <div class="market-name">${t('awaiting_data')}</div>
+      <div class="market-price">${e.message || t('waiting_data')}</div>
+    </article>`;
+    setText('market-watch-updated', t('waiting_data'));
   }
 }
 
@@ -1070,6 +1155,7 @@ function initGoldApp() {
   initControls();
   initAutoRefresh();
   loadHeader();
+  loadMarkets();
   loadTab(document.querySelector('.tab-btn.active')?.dataset.tab || 'patterns');
 }
 
