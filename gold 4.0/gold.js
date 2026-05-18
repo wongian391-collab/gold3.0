@@ -31,6 +31,7 @@ const I18N = {
     tab_risk: 'Risk',
     k_line_chart: 'K-line Chart',
     latest_price: 'Latest',
+    daily: 'Daily',
     window: 'Window',
     refresh: 'Refresh',
     awaiting_data: 'Awaiting data',
@@ -82,6 +83,7 @@ const I18N = {
     volatility_pct: 'Volatility %',
     drawdown_pct: 'Drawdown %',
     correlation_unavailable: 'Cross-asset correlations are unavailable because comparison feeds could not be loaded.',
+    actual_history_unavailable: 'Historical market series unavailable. Restart the local server so charts can use real market closes.',
     portfolio_value: 'Portfolio Value (start = 100)',
     pearson: 'Pearson Correlation',
     usd_per_oz: 'USD / oz',
@@ -104,6 +106,7 @@ const I18N = {
     tab_risk: '风险',
     k_line_chart: 'K线图',
     latest_price: '最新价',
+    daily: '单日',
     window: '区间',
     refresh: '刷新',
     awaiting_data: '等待数据中',
@@ -155,6 +158,7 @@ const I18N = {
     volatility_pct: '波动率 %',
     drawdown_pct: '回撤 %',
     correlation_unavailable: '由于对比数据源暂时无法加载，跨资产相关性暂不可用。',
+    actual_history_unavailable: '历史市场序列暂不可用。请重启本地服务器，以便图表使用真实市场收盘价。',
     portfolio_value: '组合净值（起始 = 100）',
     pearson: '皮尔逊相关系数',
     usd_per_oz: '美元 / 盎司',
@@ -874,8 +878,8 @@ async function loadMarkets() {
   }
 }
 
-function normalizeMarketSeries(asset) {
-  if (
+function hasActualMarketSeries(asset) {
+  return (
     Array.isArray(asset.dates) &&
     Array.isArray(asset.open) &&
     Array.isArray(asset.high) &&
@@ -886,38 +890,7 @@ function normalizeMarketSeries(asset) {
     asset.open.length === asset.close.length &&
     asset.high.length === asset.close.length &&
     asset.low.length === asset.close.length
-  ) {
-    return asset;
-  }
-
-  const price = Number(asset.price) || 0;
-  const prev = price - (Number(asset.daily_change) || 0);
-  const first = price - (Number(asset.window_change) || 0);
-  const pointCount = Math.max(30, Math.min(days, 1000));
-  const end = asset.market_date ? new Date(`${asset.market_date}T00:00:00Z`) : todayUtcDate();
-  const symbolSeed = String(asset.symbol || asset.label || '').split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
-
-  const dates = Array.from({ length: pointCount }, (_, i) => {
-    const d = new Date(end);
-    d.setUTCDate(end.getUTCDate() - pointCount + i + 1);
-    return d.toISOString().slice(0, 10);
-  });
-  const close = dates.map((_, i) => {
-    if (i === pointCount - 1) return price;
-    if (i === pointCount - 2) return prev;
-    const progress = pointCount === 1 ? 1 : i / (pointCount - 1);
-    const trend = first + (price - first) * progress;
-    const wave = Math.sin(i / 6 + symbolSeed) * Math.abs(price || first || 1) * 0.006;
-    return Number((trend + wave).toFixed(4));
-  });
-  const open = close.map((value, i) => {
-    const prevClose = close[Math.max(0, i - 1)];
-    return Number(((prevClose + value) / 2).toFixed(4));
-  });
-  const high = close.map((value, i) => Math.max(value, open[i]));
-  const low = close.map((value, i) => Math.min(value, open[i]));
-
-  return { ...asset, dates, open, high, low, close, synthetic: true };
+  );
 }
 
 async function loadMarketCharts() {
@@ -927,10 +900,15 @@ async function loadMarketCharts() {
   try {
     const d = await apiFetch(`/api/markets?days=${days}`);
     if (d.error) throw new Error(d.error);
-    const assets = (Array.isArray(d.assets) ? d.assets : []).map(normalizeMarketSeries);
+    const rawAssets = Array.isArray(d.assets) ? d.assets : [];
+    const assets = rawAssets.filter(hasActualMarketSeries);
     if (!assets.length) throw new Error('No market data returned');
+    const missingCount = rawAssets.length - assets.length;
+    const warning = missingCount > 0
+      ? `<div class="market-warning">${t('actual_history_unavailable')}</div>`
+      : '';
 
-    container.innerHTML = assets.map((asset, index) => `
+    container.innerHTML = warning + assets.map((asset, index) => `
       <section class="market-section" id="market-section-${marketSlug(asset.symbol)}">
         <div class="market-section-head">
           <div>
@@ -943,7 +921,7 @@ async function loadMarketCharts() {
               <div class="market-pill-value">${fmtMarketPrice(asset)}</div>
             </div>
             <div class="market-pill">
-              <div class="market-pill-label">Daily</div>
+              <div class="market-pill-label">${t('daily')}</div>
               <div class="market-pill-value ${moveClass(asset.daily_change)}">${fmtPct(asset.daily_pct_change)}</div>
             </div>
             <div class="market-pill">
@@ -959,17 +937,29 @@ async function loadMarketCharts() {
     assets.forEach((asset, index) => {
       const ma20 = sma(asset.close, 20);
       const ma50 = sma(asset.close, 50);
-      renderPlot(`market-k-${index}`, [
-        {
-          type: 'scatter',
-          mode: 'lines',
+      const priceTrace = asset.close.length <= 900 ? {
+          type: 'candlestick',
           x: asset.dates,
           name: asset.label,
+          open: asset.open,
+          high: asset.high,
+          low: asset.low,
+          close: asset.close,
+          increasing: { line: { color: '#22c55e', width: 1 }, fillcolor: 'rgba(34,197,94,0.35)' },
+          decreasing: { line: { color: '#ef4444', width: 1 }, fillcolor: 'rgba(239,68,68,0.35)' },
+        } : {
+          type: 'scattergl',
+          mode: 'lines',
+          x: asset.dates,
           y: asset.close,
-          line: { color: '#FFD700', width: 2.4, shape: 'spline' },
-          connectgaps: true,
-          hovertemplate: '%{x}<br>%{y:.2f}<extra></extra>',
-        },
+          name: `${asset.label} close`,
+          line: { color: '#FFD700', width: 1.8 },
+          connectgaps: false,
+          hovertemplate: '%{x}<br>Close: %{y:.2f}<extra></extra>',
+        };
+
+      renderPlot(`market-k-${index}`, [
+        priceTrace,
         {
           x: asset.dates,
           y: ma20,
@@ -985,7 +975,7 @@ async function loadMarketCharts() {
       ], plyLayout({
         height: 440,
         margin: { l: 58, r: 20, t: 18, b: 40 },
-        xaxis: { gridcolor: '#334155', linecolor: '#334155' },
+        xaxis: { gridcolor: '#334155', linecolor: '#334155', rangeslider: { visible: false } },
         yaxis: { title: asset.unit, gridcolor: '#334155' },
       }));
     });

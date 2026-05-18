@@ -146,8 +146,10 @@ header {
   margin-top: 4px;
 }
 
-.stat-delta.up   { color: var(--green); }
-.stat-delta.down { color: var(--red);   }
+.stat-delta.up,
+.stat-delta.bull { color: var(--green); }
+.stat-delta.down,
+.stat-delta.bear { color: var(--red);   }
 
 /* ── Market Watch ──────────────────────────────────────────────── */
 .market-watch {
@@ -253,6 +255,15 @@ header {
 .market-sections {
   display: grid;
   gap: 18px;
+}
+
+.market-warning {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
 }
 
 .market-section {
