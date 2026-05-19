@@ -11,10 +11,13 @@ const AUTO_REFRESH_MS = 60 * 1000;
 let autoRefreshTimer = null;
 let midnightRefreshTimer = null;
 let currentLang = localStorage.getItem('gold_lang') || 'en';
+let activeAnalysis = localStorage.getItem('gold_analysis_view') || 'gold';
 
 const I18N = {
   en: {
     site_title: 'Gold Price Analyst',
+    analysis_gold: 'Gold Price Analysis',
+    analysis_stock: 'Stock Price Analysis',
     waiting_data: 'Waiting for data',
     current_price: 'Current Price',
     window_change: 'Window Change',
@@ -22,6 +25,9 @@ const I18N = {
     period_low: 'Period Low',
     market_watch: 'Cross-Market Watch',
     market_watch_title: 'Gold context',
+    stock_watch: 'US Stock Watch',
+    stock_watch_title: 'CELC · QBTS · OUST · OKLO · TEM',
+    stock_price_analysis: 'Stock Price Analysis',
     market_daily: value => `Daily ${value}`,
     market_window_move: value => `${windowLabel()} ${value}`,
     tab_patterns: 'Patterns',
@@ -51,6 +57,7 @@ const I18N = {
     full_volatility: 'Full Volatility',
     volatility_30d: '30D Volatility',
     disclaimer: 'Live COMEX gold data is served through the local API, with fallback only if the upstream source is unavailable.',
+    stock_disclaimer: 'US stock prices are served through the local API using market history from Yahoo Finance.',
     market_window: (days, date) => `GC=F · COMEX · ${windowLabel(days)} window · market date ${date}`,
     last_checked: value => `Last checked ${value}`,
     daily_prefix: value => `Daily: ${value}`,
@@ -90,6 +97,8 @@ const I18N = {
   },
   zh: {
     site_title: '黄金分析仪表板',
+    analysis_gold: '黄金价格分析',
+    analysis_stock: '股票价格分析',
     waiting_data: '等待数据中',
     current_price: '当前金价',
     window_change: '区间变化',
@@ -97,6 +106,9 @@ const I18N = {
     period_low: '区间低点',
     market_watch: '跨市场观察',
     market_watch_title: '黄金相关市场',
+    stock_watch: '美股观察',
+    stock_watch_title: 'CELC · QBTS · OUST · OKLO · TEM',
+    stock_price_analysis: '股票价格分析',
     market_daily: value => `单日 ${value}`,
     market_window_move: value => `${windowLabel()} ${value}`,
     tab_patterns: '走势形态',
@@ -126,6 +138,7 @@ const I18N = {
     full_volatility: '整体波动率',
     volatility_30d: '30日波动率',
     disclaimer: '实时 COMEX 黄金数据通过本地 API 提供；仅在上游数据源不可用时才会回退。',
+    stock_disclaimer: '美股价格通过本地 API 提供，历史行情来自 Yahoo Finance。',
     market_window: (days, date) => `GC=F · COMEX · ${windowLabel(days)}区间 · 市场日期 ${date}`,
     last_checked: value => `上次检查 ${value}`,
     daily_prefix: value => `单日: ${value}`,
@@ -428,7 +441,8 @@ function buildMockData(windowDays) {
         { label: 'DXY', corr: Number((-0.42 - pseudoCorr * 0.2).toFixed(3)) },
         { label: 'Silver', corr: Number((0.68 + pseudoCorr * 0.15).toFixed(3)) },
         { label: 'S&P 500', corr: Number((0.18 + pseudoCorr * 0.1).toFixed(3)) },
-        { label: 'Vanguard VOO', corr: Number((0.2 + pseudoCorr * 0.08).toFixed(3)) },
+        { label: 'Dow Jones', corr: Number((0.2 + pseudoCorr * 0.08).toFixed(3)) },
+        { label: 'AUD/JPY', corr: Number((-0.16 + pseudoCorr * 0.06).toFixed(3)) },
         { label: 'WTI Crude', corr: Number((0.12 - pseudoCorr * 0.1).toFixed(3)) },
         { label: 'UST 10Y', corr: Number((-0.27 + pseudoCorr * 0.12).toFixed(3)) },
       ],
@@ -438,9 +452,21 @@ function buildMockData(windowDays) {
       fallback: true,
       assets: [
         mockMarketAsset('S&P 500', '^GSPC', 'index', 5200, 0.55, windowDays, 0),
-        mockMarketAsset('Vanguard VOO', 'VOO', 'USD', 500, 0.5, windowDays, 1.4),
-        mockMarketAsset('WTI Crude', 'CL=F', 'USD/bbl', 78, -0.18, windowDays, 2.6),
+        mockMarketAsset('Dow Jones', '^DJI', 'index', 39000, 4.1, windowDays, 1.4),
+        mockMarketAsset('AUD/JPY', 'AUDJPY=X', 'JPY/AUD', 99, 0.012, windowDays, 2.2),
+        mockMarketAsset('WTI Crude', 'CL=F', 'USD/bbl', 78, -0.18, windowDays, 3.0),
         mockMarketAsset('Silver', 'SI=F', 'USD/oz', 31, 0.36, windowDays, 3.8),
+      ],
+    },
+    stocks: {
+      last_updated: new Date().toISOString(),
+      fallback: true,
+      assets: [
+        mockMarketAsset('CELC', 'CELC', 'USD', 14, 0.018, windowDays, 0.4),
+        mockMarketAsset('QBTS', 'QBTS', 'USD', 7, 0.012, windowDays, 1.1),
+        mockMarketAsset('OUST', 'OUST', 'USD', 12, 0.016, windowDays, 1.8),
+        mockMarketAsset('OKLO', 'OKLO', 'USD', 45, 0.07, windowDays, 2.5),
+        mockMarketAsset('TEM', 'TEM', 'USD', 65, 0.09, windowDays, 3.2),
       ],
     },
   };
@@ -489,6 +515,7 @@ function getMockPayload(url) {
   if (parsed.pathname === '/api/backtest') return mock.backtest;
   if (parsed.pathname === '/api/risk') return mock.risk;
   if (parsed.pathname === '/api/markets') return mock.markets;
+  if (parsed.pathname === '/api/stocks') return mock.stocks;
   return { error: 'Unknown mock endpoint' };
 }
 
@@ -538,13 +565,20 @@ const PLY_CFG = {
 
 function plyLayout(overrides = {}) {
   return {
-    paper_bgcolor: '#1e293b',
-    plot_bgcolor:  '#1e293b',
-    font:   { color: '#f1f5f9', family: '-apple-system, sans-serif', size: 11 },
+    paper_bgcolor: '#090c11',
+    plot_bgcolor:  '#090c11',
+    font:   { color: '#f4f5f7', family: 'SFMono-Regular, Roboto Mono, IBM Plex Mono, Consolas, monospace', size: 11 },
     margin: { l: 50, r: 20, t: 30, b: 40 },
-    xaxis:  { gridcolor: '#334155', linecolor: '#334155', zeroline: false },
-    yaxis:  { gridcolor: '#334155', linecolor: '#334155', zeroline: false },
-    legend: { bgcolor: 'transparent', borderwidth: 0, orientation: 'h', x: 0, y: 1.08 },
+    xaxis:  { gridcolor: '#242a33', linecolor: '#454b55', zeroline: false },
+    yaxis:  { gridcolor: '#242a33', linecolor: '#454b55', zeroline: false },
+    legend: {
+      bgcolor: 'rgba(5, 6, 7, 0.82)',
+      bordercolor: '#2b3038',
+      borderwidth: 1,
+      orientation: 'h',
+      x: 0,
+      y: 1.08,
+    },
     ...overrides,
   };
 }
@@ -558,6 +592,7 @@ const moveClass = n => n > 0 ? 'up' : n < 0 ? 'down' : 'flat';
 const windowLabel = (value = days) => value >= ALL_HISTORY_DAYS ? 'All' : `${value}d`;
 const fmtMarketPrice = asset => {
   if (asset.unit === 'index') return fmtN(asset.price);
+  if (asset.unit === 'JPY/AUD') return `¥${fmtN(asset.price, 2)} / AUD`;
   if (asset.unit === 'USD/bbl') return `${fmtUSD(asset.price)} / bbl`;
   if (asset.unit === 'USD/oz') return `${fmtUSD(asset.price)} / oz`;
   return fmtUSD(asset.price);
@@ -697,6 +732,38 @@ function initLanguageSwitch() {
   });
 }
 
+function initAnalysisSwitch() {
+  if (!['gold', 'stocks'].includes(activeAnalysis)) activeAnalysis = 'gold';
+  document.querySelectorAll('.analysis-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activateAnalysis(btn.dataset.analysis);
+    });
+  });
+  activateAnalysis(activeAnalysis);
+}
+
+function activateAnalysis(kind) {
+  if (!['gold', 'stocks'].includes(kind)) kind = 'gold';
+  activeAnalysis = kind;
+  localStorage.setItem('gold_analysis_view', activeAnalysis);
+
+  document.querySelectorAll('.analysis-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.analysis === activeAnalysis);
+  });
+  document.querySelectorAll('.analysis-view').forEach(view => {
+    view.classList.toggle('active', view.id === `analysis-${activeAnalysis}`);
+  });
+
+  if (activeAnalysis === 'stocks') {
+    loadStocks();
+    loadStockCharts();
+  } else {
+    loadMarkets();
+    const active = document.querySelector('.tab-btn.active')?.dataset.tab || 'patterns';
+    loadTab(active);
+  }
+}
+
 function loadTab(tab) {
   const key = tab + ':' + days;
   if (loaded.has(key)) return;
@@ -743,13 +810,27 @@ function initControls() {
   }
 }
 
+function initStockControls() {
+  const refreshBtn = $id('btn-stock-refresh');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      refreshAll();
+    });
+  }
+}
+
 function refreshAll() {
   invalidateCache();
   loaded.clear();
   loadHeader();
-  loadMarkets();
-  const active = document.querySelector('.tab-btn.active')?.dataset.tab;
-  if (active) loadTab(active);
+  if (activeAnalysis === 'stocks') {
+    loadStocks();
+    loadStockCharts();
+  } else {
+    loadMarkets();
+    const active = document.querySelector('.tab-btn.active')?.dataset.tab;
+    if (active) loadTab(active);
+  }
 }
 
 async function openMarketSection(symbol) {
@@ -759,6 +840,19 @@ async function openMarketSection(symbol) {
   const target = $id(`market-section-${slug}`);
   if (target) {
     window.history.replaceState(null, '', `#market-${slug}`);
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.classList.add('market-section-focus');
+    window.setTimeout(() => target.classList.remove('market-section-focus'), 1200);
+  }
+}
+
+async function openStockSection(symbol) {
+  const slug = marketSlug(symbol);
+  activateAnalysis('stocks');
+  await loadStockCharts();
+  const target = $id(`stock-section-${slug}`);
+  if (target) {
+    window.history.replaceState(null, '', `#stock-${slug}`);
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     target.classList.add('market-section-focus');
     window.setTimeout(() => target.classList.remove('market-section-focus'), 1200);
@@ -945,15 +1039,15 @@ async function loadMarketCharts() {
           high: asset.high,
           low: asset.low,
           close: asset.close,
-          increasing: { line: { color: '#22c55e', width: 1 }, fillcolor: 'rgba(34,197,94,0.35)' },
-          decreasing: { line: { color: '#ef4444', width: 1 }, fillcolor: 'rgba(239,68,68,0.35)' },
+          increasing: { line: { color: '#00c853', width: 1 }, fillcolor: 'rgba(34,197,94,0.35)' },
+          decreasing: { line: { color: '#ff3b30', width: 1 }, fillcolor: 'rgba(239,68,68,0.35)' },
         } : {
           type: 'scattergl',
           mode: 'lines',
           x: asset.dates,
           y: asset.close,
           name: `${asset.label} close`,
-          line: { color: '#FFD700', width: 1.8 },
+          line: { color: '#ffbf00', width: 1.8 },
           connectgaps: false,
           hovertemplate: '%{x}<br>Close: %{y:.2f}<extra></extra>',
         };
@@ -964,24 +1058,159 @@ async function loadMarketCharts() {
           x: asset.dates,
           y: ma20,
           name: 'MA-20',
-          line: { color: '#60A5FA', width: 1.2 },
+          line: { color: '#28a9ff', width: 1.2 },
         },
         {
           x: asset.dates,
           y: ma50,
           name: 'MA-50',
-          line: { color: '#F97316', width: 1.2, dash: 'dash' },
+          line: { color: '#ff7a00', width: 1.2, dash: 'dash' },
         },
       ], plyLayout({
         height: 440,
         margin: { l: 58, r: 20, t: 18, b: 40 },
-        xaxis: { gridcolor: '#334155', linecolor: '#334155', rangeslider: { visible: false } },
-        yaxis: { title: asset.unit, gridcolor: '#334155' },
+        xaxis: { gridcolor: '#242a33', linecolor: '#242a33', rangeslider: { visible: false } },
+        yaxis: { title: asset.unit, gridcolor: '#242a33' },
       }));
     });
   } catch (e) {
     console.error('market charts:', e);
-    container.innerHTML = `<div class="chart-box"><div class="spinner-wrap" style="color:#ef4444">Error: ${e.message}</div></div>`;
+    container.innerHTML = `<div class="chart-box"><div class="spinner-wrap" style="color:#ff3b30">Error: ${e.message}</div></div>`;
+  }
+}
+
+async function loadStocks() {
+  const grid = $id('stock-grid');
+  if (!grid) return;
+
+  try {
+    const d = await apiFetch(`/api/stocks?days=${days}`);
+    if (d.error) throw new Error(d.error);
+    const assets = Array.isArray(d.assets) ? d.assets : [];
+    if (!assets.length) throw new Error('No stock data returned');
+
+    grid.innerHTML = assets.map(asset => {
+      const dailyClass = moveClass(asset.daily_change);
+      const windowClass = moveClass(asset.window_change);
+      return `
+        <button class="market-card market-card-link" type="button" data-stock-symbol="${asset.symbol}">
+          <div class="market-name">
+            <span>${asset.label}</span>
+            <span class="market-symbol">${asset.symbol}</span>
+          </div>
+          <div class="market-price">${fmtMarketPrice(asset)}</div>
+          <div class="market-moves">
+            <div class="market-move ${dailyClass}">${t('market_daily', fmtPct(asset.daily_pct_change))}</div>
+            <div class="market-move ${windowClass}">${t('market_window_move', fmtPct(asset.window_pct_change))}</div>
+          </div>
+        </button>`;
+    }).join('');
+
+    grid.querySelectorAll('[data-stock-symbol]').forEach(card => {
+      card.addEventListener('click', () => openStockSection(card.dataset.stockSymbol));
+    });
+
+    const suffix = d.fallback ? ` · ${t('derived_market_action')}` : '';
+    setText('stock-watch-updated', `${t('last_checked', fmtLocalTime(d.last_updated))}${suffix}`);
+  } catch (e) {
+    console.error('stocks:', e);
+    grid.innerHTML = `<article class="market-card loading">
+      <div class="market-name">${t('awaiting_data')}</div>
+      <div class="market-price">${e.message || t('waiting_data')}</div>
+    </article>`;
+    setText('stock-watch-updated', t('waiting_data'));
+  }
+}
+
+async function loadStockCharts() {
+  const container = $id('stock-sections');
+  if (!container) return;
+
+  try {
+    const d = await apiFetch(`/api/stocks?days=${days}`);
+    if (d.error) throw new Error(d.error);
+    const rawAssets = Array.isArray(d.assets) ? d.assets : [];
+    const assets = rawAssets.filter(hasActualMarketSeries);
+    if (!assets.length) throw new Error('No stock data returned');
+    const missingCount = rawAssets.length - assets.length;
+    const warning = missingCount > 0
+      ? `<div class="market-warning">${t('actual_history_unavailable')}</div>`
+      : '';
+
+    container.innerHTML = warning + assets.map((asset, index) => `
+      <section class="market-section" id="stock-section-${marketSlug(asset.symbol)}">
+        <div class="market-section-head">
+          <div>
+            <h2 class="market-section-title">${asset.label}</h2>
+            <div class="market-section-sub">${asset.symbol} · ${t('k_line_chart')} · ${asset.market_date}</div>
+          </div>
+          <div class="market-section-stats">
+            <div class="market-pill">
+              <div class="market-pill-label">${t('latest_price')}</div>
+              <div class="market-pill-value">${fmtMarketPrice(asset)}</div>
+            </div>
+            <div class="market-pill">
+              <div class="market-pill-label">${t('daily')}</div>
+              <div class="market-pill-value ${moveClass(asset.daily_change)}">${fmtPct(asset.daily_pct_change)}</div>
+            </div>
+            <div class="market-pill">
+              <div class="market-pill-label">${windowLabel()}</div>
+              <div class="market-pill-value ${moveClass(asset.window_change)}">${fmtPct(asset.window_pct_change)}</div>
+            </div>
+          </div>
+        </div>
+        <div class="market-k-chart" id="stock-k-${index}"></div>
+      </section>
+    `).join('');
+
+    assets.forEach((asset, index) => {
+      const ma20 = sma(asset.close, 20);
+      const ma50 = sma(asset.close, 50);
+      const priceTrace = asset.close.length <= 900 ? {
+          type: 'candlestick',
+          x: asset.dates,
+          name: asset.label,
+          open: asset.open,
+          high: asset.high,
+          low: asset.low,
+          close: asset.close,
+          increasing: { line: { color: '#00c853', width: 1 }, fillcolor: 'rgba(34,197,94,0.35)' },
+          decreasing: { line: { color: '#ff3b30', width: 1 }, fillcolor: 'rgba(239,68,68,0.35)' },
+        } : {
+          type: 'scattergl',
+          mode: 'lines',
+          x: asset.dates,
+          y: asset.close,
+          name: `${asset.label} close`,
+          line: { color: '#ffbf00', width: 1.8 },
+          connectgaps: false,
+          hovertemplate: '%{x}<br>Close: $%{y:.2f}<extra></extra>',
+        };
+
+      renderPlot(`stock-k-${index}`, [
+        priceTrace,
+        {
+          x: asset.dates,
+          y: ma20,
+          name: 'MA-20',
+          line: { color: '#28a9ff', width: 1.2 },
+        },
+        {
+          x: asset.dates,
+          y: ma50,
+          name: 'MA-50',
+          line: { color: '#ff7a00', width: 1.2, dash: 'dash' },
+        },
+      ], plyLayout({
+        height: 440,
+        margin: { l: 58, r: 20, t: 18, b: 40 },
+        xaxis: { gridcolor: '#242a33', linecolor: '#242a33', rangeslider: { visible: false } },
+        yaxis: { title: 'USD', gridcolor: '#242a33' },
+      }));
+    });
+  } catch (e) {
+    console.error('stock charts:', e);
+    container.innerHTML = `<div class="chart-box"><div class="spinner-wrap" style="color:#ff3b30">Error: ${e.message}</div></div>`;
   }
 }
 
@@ -1023,14 +1252,14 @@ async function loadPatterns() {
     // Build chart traces — price row shares xaxis, RSI and MACD use yaxis2/3
     // Layout uses domain-based subplots so x-axis zooming syncs automatically
     const traces = [
-      { x: dates, y: prices,   name: 'Gold',   line: { color: '#FFD700', width: 2 }, yaxis: 'y' },
-      { x: dates, y: ma20,     name: 'MA-20',  line: { color: '#60A5FA', width: 1.2, dash: 'dash' }, yaxis: 'y' },
-      { x: dates, y: ma50,     name: 'MA-50',  line: { color: '#F97316', width: 1.2, dash: 'dash' }, yaxis: 'y' },
+      { x: dates, y: prices,   name: 'Gold',   line: { color: '#ffbf00', width: 2 }, yaxis: 'y' },
+      { x: dates, y: ma20,     name: 'MA-20',  line: { color: '#28a9ff', width: 1.2, dash: 'dash' }, yaxis: 'y' },
+      { x: dates, y: ma50,     name: 'MA-50',  line: { color: '#ff7a00', width: 1.2, dash: 'dash' }, yaxis: 'y' },
     ];
 
     if (ma200.some(v => v !== null)) {
       traces.push({ x: dates, y: ma200, name: 'MA-200',
-        line: { color: '#A78BFA', width: 1, dash: 'dot' }, yaxis: 'y' });
+        line: { color: '#b68cff', width: 1, dash: 'dot' }, yaxis: 'y' });
     }
 
     // Bollinger band fill (polygon between upper and lower)
@@ -1047,32 +1276,32 @@ async function loadPatterns() {
 
     // RSI (second subplot via yaxis2)
     traces.push({ x: dates, y: rsi, name: 'RSI',
-      line: { color: '#34D399', width: 1.5 }, yaxis: 'y2', showlegend: false });
+      line: { color: '#00c853', width: 1.5 }, yaxis: 'y2', showlegend: false });
 
     // MACD (third subplot via yaxis3)
     traces.push({ x: dates, y: macd_line, name: 'MACD',
-      line: { color: '#60A5FA', width: 1.2 }, yaxis: 'y3', showlegend: false });
+      line: { color: '#28a9ff', width: 1.2 }, yaxis: 'y3', showlegend: false });
     traces.push({ x: dates, y: macd_signal, name: 'Signal',
-      line: { color: '#F97316', width: 1.2, dash: 'dash' }, yaxis: 'y3', showlegend: false });
+      line: { color: '#ff7a00', width: 1.2, dash: 'dash' }, yaxis: 'y3', showlegend: false });
     traces.push({
       type: 'bar', x: dates, y: macd_hist, yaxis: 'y3', showlegend: false,
-      marker: { color: macd_hist.map(v => v == null ? '#94a3b8' : v >= 0 ? '#34D399' : '#F87171'), opacity: 0.6 },
+      marker: { color: macd_hist.map(v => v == null ? '#8f99a8' : v >= 0 ? '#00c853' : '#ff5c52'), opacity: 0.6 },
     });
 
     const layout = plyLayout({
       height: 760,
       margin: { l: 58, r: 24, t: 38, b: 52 },
-      xaxis:  { gridcolor: '#334155', linecolor: '#334155', zeroline: false, tickfont: { size: 10 } },
+      xaxis:  { gridcolor: '#242a33', linecolor: '#242a33', zeroline: false, tickfont: { size: 10 } },
       yaxis:  { domain: [0.50, 1.00], title: t('usd_per_oz') },
       yaxis2: { domain: [0.27, 0.43], title: 'RSI', range: [0, 100] },
       yaxis3: { domain: [0.00, 0.17], title: 'MACD' },
       shapes: [
         { type: 'line', yref: 'y2', xref: 'paper', x0: 0, x1: 1, y0: 70, y1: 70,
-          line: { color: '#ef4444', dash: 'dash', width: 0.8 } },
+          line: { color: '#ff3b30', dash: 'dash', width: 0.8 } },
         { type: 'line', yref: 'y2', xref: 'paper', x0: 0, x1: 1, y0: 30, y1: 30,
-          line: { color: '#22c55e', dash: 'dash', width: 0.8 } },
+          line: { color: '#00c853', dash: 'dash', width: 0.8 } },
         { type: 'line', yref: 'y3', xref: 'paper', x0: 0, x1: 1, y0: 0, y1: 0,
-          line: { color: '#94a3b8', width: 0.6 } },
+          line: { color: '#8f99a8', width: 0.6 } },
       ],
     });
 
@@ -1100,7 +1329,7 @@ async function loadPatterns() {
     if (srEl) srEl.innerHTML = html;
 
   } catch (e) {
-    setHTML('patterns-chart', `<div class="spinner-wrap" style="color:#ef4444">Error: ${e.message}</div>`);
+    setHTML('patterns-chart', `<div class="spinner-wrap" style="color:#ff3b30">Error: ${e.message}</div>`);
   }
 }
 
@@ -1114,7 +1343,7 @@ async function loadSentiment() {
     if (d.error) d = buildClientSentimentFallback();
     if (!Array.isArray(d.articles) || !d.articles.length) d = buildClientSentimentFallback();
 
-    const color = d.avg > 0.1 ? '#22c55e' : d.avg < -0.1 ? '#ef4444' : '#94a3b8';
+    const color = d.avg > 0.1 ? '#00c853' : d.avg < -0.1 ? '#ff3b30' : '#8f99a8';
     const sign  = d.avg >= 0 ? '+' : '';
     setHTML('sentiment-gauge', `
       <div class="gauge-score" style="color:${color}">${sign}${d.avg.toFixed(3)}</div>
@@ -1126,7 +1355,7 @@ async function loadSentiment() {
       type: 'pie',
       labels: ['Bullish', 'Neutral', 'Bearish'],
       values: d.counts,
-      marker: { colors: ['#22c55e', '#94a3b8', '#ef4444'] },
+      marker: { colors: ['#00c853', '#8f99a8', '#ff3b30'] },
       hole: 0.45, textinfo: 'label+percent',
     }], plyLayout({ height: 260, margin: { l: 10, r: 10, t: 10, b: 10 }, showlegend: false }));
 
@@ -1136,22 +1365,22 @@ async function loadSentiment() {
 
     renderPlot('sentiment-bars', [{
       type: 'bar', x: scores, y: labels, orientation: 'h',
-      marker: { color: scores.map(s => s > 0.1 ? '#22c55e' : s < -0.1 ? '#ef4444' : '#94a3b8') },
+      marker: { color: scores.map(s => s > 0.1 ? '#00c853' : s < -0.1 ? '#ff3b30' : '#8f99a8') },
       text: scores.map(s => (s >= 0 ? '+' : '') + s.toFixed(2)),
       textposition: 'outside',
     }], plyLayout({
       height: Math.max(300, d.articles.length * 34),
       margin: { l: 20, r: 60, t: 30, b: 30 },
-      xaxis: { title: t('sentiment_score'), range: [-1.2, 1.2], gridcolor: '#334155' },
-      yaxis: { autorange: 'reversed', tickfont: { size: 9 }, gridcolor: '#334155' },
+      xaxis: { title: t('sentiment_score'), range: [-1.2, 1.2], gridcolor: '#242a33' },
+      yaxis: { autorange: 'reversed', tickfont: { size: 9 }, gridcolor: '#242a33' },
       shapes: [{
         type: 'line', x0: d.avg, x1: d.avg, y0: 0, y1: 1, yref: 'paper',
-        line: { color: '#FFD700', dash: 'dash', width: 1.5 },
+        line: { color: '#ffbf00', dash: 'dash', width: 1.5 },
       }],
     }));
 
   } catch (e) {
-    setHTML('sentiment-gauge', `<div style="color:#ef4444;font-size:12px">Error: ${e.message}</div>`);
+    setHTML('sentiment-gauge', `<div style="color:#ff3b30;font-size:12px">Error: ${e.message}</div>`);
   }
 }
 
@@ -1173,11 +1402,11 @@ async function loadBacktest() {
     });
 
     // Equity curves
-    const pal = ['#60A5FA', '#34D399', '#F97316'];
+    const pal = ['#28a9ff', '#00c853', '#ff7a00'];
     const traces = [{
       x: d.dates, y: d.bh_equity,
       name: `Buy & Hold (${fmtPct(d.bh_return)})`,
-      line: { color: '#94a3b8', dash: 'dash', width: 1.5 },
+      line: { color: '#8f99a8', dash: 'dash', width: 1.5 },
     }];
     d.strategies.forEach((s, i) => {
       traces.push({
@@ -1189,10 +1418,10 @@ async function loadBacktest() {
 
     renderPlot('backtest-chart', traces, plyLayout({
       height: 380,
-      yaxis: { title: t('portfolio_value'), gridcolor: '#334155' },
+      yaxis: { title: t('portfolio_value'), gridcolor: '#242a33' },
       shapes: [{
         type: 'line', x0: d.dates[0], x1: d.dates.at(-1), y0: 100, y1: 100,
-        line: { color: '#ffffff', dash: 'dot', width: 0.5 },
+        line: { color: '#f4f5f7', dash: 'dot', width: 0.5 },
       }],
     }));
 
@@ -1209,7 +1438,7 @@ async function loadBacktest() {
       </tr>`).join(''));
 
   } catch (e) {
-    setHTML('backtest-chart', `<div class="spinner-wrap" style="color:#ef4444">Error: ${e.message}</div>`);
+    setHTML('backtest-chart', `<div class="spinner-wrap" style="color:#ff3b30">Error: ${e.message}</div>`);
   }
 }
 
@@ -1242,30 +1471,30 @@ async function loadRisk() {
     renderPlot('risk-vol-chart', [{
       x: d.vol_dates, y: d.vol_roll,
       fill: 'tozeroy', fillcolor: 'rgba(249,115,22,0.13)',
-      line: { color: '#F97316', width: 1.8 }, name: 'Vol',
+      line: { color: '#ff7a00', width: 1.8 }, name: 'Vol',
     }], plyLayout({
       height: 260, showlegend: false,
-      yaxis: { title: t('volatility_pct'), gridcolor: '#334155' },
+      yaxis: { title: t('volatility_pct'), gridcolor: '#242a33' },
       margin: { l: 50, r: 20, t: 20, b: 40 },
     }));
 
     // Return distribution
     renderPlot('risk-dist-chart', [{
       type: 'histogram', x: d.returns, nbinsx: 40,
-      marker: { color: '#3b82f6', opacity: 0.8 },
+      marker: { color: '#28a9ff', opacity: 0.8 },
     }], plyLayout({
       height: 260, showlegend: false,
-      xaxis: { title: t('daily_return'), gridcolor: '#334155' },
-      yaxis: { title: t('frequency'),      gridcolor: '#334155' },
+      xaxis: { title: t('daily_return'), gridcolor: '#242a33' },
+      yaxis: { title: t('frequency'),      gridcolor: '#242a33' },
       margin: { l: 50, r: 20, t: 20, b: 40 },
       shapes: [{
         type: 'line', x0: -d.var95, x1: -d.var95, y0: 0, y1: 1, yref: 'paper',
-        line: { color: '#ef4444', dash: 'dash', width: 1.5 },
+        line: { color: '#ff3b30', dash: 'dash', width: 1.5 },
       }],
       annotations: [{
         x: -d.var95, y: 0.97, yref: 'paper', xanchor: 'right',
         text: `VaR 95%: ${d.var95.toFixed(2)}%`,
-        showarrow: false, font: { color: '#ef4444', size: 10 },
+        showarrow: false, font: { color: '#ff3b30', size: 10 },
       }],
     }));
 
@@ -1273,10 +1502,10 @@ async function loadRisk() {
     renderPlot('risk-dd-chart', [{
       x: d.dd_dates, y: d.drawdown,
       fill: 'tozeroy', fillcolor: 'rgba(239,68,68,0.22)',
-      line: { color: '#ef4444', width: 1 },
+      line: { color: '#ff3b30', width: 1 },
     }], plyLayout({
       height: 220, showlegend: false,
-      yaxis: { title: t('drawdown_pct'), gridcolor: '#334155' },
+      yaxis: { title: t('drawdown_pct'), gridcolor: '#242a33' },
       margin: { l: 50, r: 20, t: 20, b: 40 },
     }));
 
@@ -1287,17 +1516,17 @@ async function loadRisk() {
         x: d.correlations.map(c => c.label),
         y: d.correlations.map(c => c.corr),
         customdata: d.correlations.map(c => [c.symbol, c.observations]),
-        marker: { color: d.correlations.map(c => c.corr > 0 ? '#22c55e' : '#ef4444') },
+        marker: { color: d.correlations.map(c => c.corr > 0 ? '#00c853' : '#ff3b30') },
         text: d.correlations.map(c => (c.corr >= 0 ? '+' : '') + c.corr.toFixed(3)),
         textposition: 'outside',
         hovertemplate: '%{x}<br>%{customdata[0]}<br>Correlation: %{y:.3f}<br>Aligned days: %{customdata[1]}<extra></extra>',
       }], plyLayout({
         height: 280, showlegend: false,
-        yaxis: { title: t('pearson'), range: [-1.15, 1.15], gridcolor: '#334155' },
+        yaxis: { title: t('pearson'), range: [-1.15, 1.15], gridcolor: '#242a33' },
         margin: { l: 50, r: 20, t: 20, b: 50 },
         shapes: [{
           type: 'line', x0: -0.5, x1: d.correlations.length - 0.5,
-          y0: 0, y1: 0, line: { color: '#94a3b8', width: 0.8 },
+          y0: 0, y1: 0, line: { color: '#8f99a8', width: 0.8 },
         }],
       }));
     } else {
@@ -1305,7 +1534,7 @@ async function loadRisk() {
     }
 
   } catch (e) {
-    setHTML('risk-vol-chart', `<div class="spinner-wrap" style="color:#ef4444">Error: ${e.message}</div>`);
+    setHTML('risk-vol-chart', `<div class="spinner-wrap" style="color:#ff3b30">Error: ${e.message}</div>`);
   }
 }
 
@@ -1315,13 +1544,15 @@ function initGoldApp() {
   initLanguageSwitch();
   initTabs();
   initControls();
+  initStockControls();
   initAutoRefresh();
+  initAnalysisSwitch();
   loadHeader();
-  loadMarkets();
-  loadTab(document.querySelector('.tab-btn.active')?.dataset.tab || 'patterns');
 
   if (window.location.hash.startsWith('#market-')) {
     window.setTimeout(() => openMarketSection(window.location.hash.replace('#market-', '')), 250);
+  } else if (window.location.hash.startsWith('#stock-')) {
+    window.setTimeout(() => openStockSection(window.location.hash.replace('#stock-', '')), 250);
   }
 }
 

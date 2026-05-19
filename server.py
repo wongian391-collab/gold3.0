@@ -8,6 +8,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,15 +27,24 @@ CORRELATION_ASSETS = [
   {"label": "DXY", "symbol": "DX-Y.NYB"},
   {"label": "Silver", "symbol": "SI=F"},
   {"label": "S&P 500", "symbol": "^GSPC"},
-  {"label": "Vanguard VOO", "symbol": "VOO"},
+  {"label": "Dow Jones", "symbol": "^DJI"},
+  {"label": "AUD/JPY", "symbol": "AUDJPY=X"},
   {"label": "WTI Crude", "symbol": "CL=F"},
   {"label": "UST 10Y", "symbol": "^TNX"},
 ]
 MARKET_ASSETS = [
   {"label": "S&P 500", "symbol": "^GSPC", "unit": "index"},
-  {"label": "Vanguard VOO", "symbol": "VOO", "unit": "USD"},
+  {"label": "Dow Jones", "symbol": "^DJI", "unit": "index"},
+  {"label": "AUD/JPY", "symbol": "AUDJPY=X", "unit": "JPY/AUD"},
   {"label": "WTI Crude", "symbol": "CL=F", "unit": "USD/bbl"},
   {"label": "Silver", "symbol": "SI=F", "unit": "USD/oz"},
+]
+STOCK_ASSETS = [
+  {"label": "CELC", "symbol": "CELC", "unit": "USD"},
+  {"label": "QBTS", "symbol": "QBTS", "unit": "USD"},
+  {"label": "OUST", "symbol": "OUST", "unit": "USD"},
+  {"label": "OKLO", "symbol": "OKLO", "unit": "USD"},
+  {"label": "TEM", "symbol": "TEM", "unit": "USD"},
 ]
 
 _CACHE = {}
@@ -281,11 +291,17 @@ def generated_asset_history(symbol, required_days):
 
   baselines = {
     "^GSPC": 5200,
-    "VOO": 500,
+    "^DJI": 39000,
+    "AUDJPY=X": 99,
     "CL=F": 78,
     "SI=F": 31,
     "DX-Y.NYB": 104,
     "^TNX": 4.2,
+    "CELC": 14,
+    "QBTS": 7,
+    "OUST": 12,
+    "OKLO": 45,
+    "TEM": 65,
   }
   base = baselines.get(symbol, 100)
   symbol_seed = sum(ord(ch) for ch in symbol)
@@ -336,13 +352,12 @@ def price_history(required_days):
   return history
 
 
-def build_markets_payload(days):
-  assets = []
-  for asset in MARKET_ASSETS:
+def build_single_asset_payload(asset, days):
+  try:
     rows = market_history(asset["symbol"], days)
     recent = rows[-days:] if len(rows) >= days else rows
     if len(recent) < 2:
-      continue
+      raise ValueError(f"Not enough historical data returned for {asset['symbol']}")
 
     last = recent[-1]
     prev = recent[-2]
@@ -350,7 +365,7 @@ def build_markets_payload(days):
     price = last["close"]
     prev_price = prev["close"]
     first_price = first["close"]
-    assets.append({
+    return {
       "label": asset["label"],
       "symbol": asset["symbol"],
       "unit": asset["unit"],
@@ -366,13 +381,68 @@ def build_markets_payload(days):
       "window_pct_change": ((price / first_price) - 1) * 100 if first_price else 0,
       "market_date": last["date"],
       "fallback": bool(last.get("fallback")),
-    })
+    }
+  except Exception as exc:
+    print(f"[asset] {asset['symbol']} failed: {exc}")
+    rows = generated_asset_history(asset["symbol"], days)
+    recent = rows[-days:] if len(rows) >= days else rows
+    last = recent[-1]
+    prev = recent[-2]
+    first = recent[0]
+    price = last["close"]
+    prev_price = prev["close"]
+    first_price = first["close"]
+    return {
+      "label": asset["label"],
+      "symbol": asset["symbol"],
+      "unit": asset["unit"],
+      "dates": [row["date"] for row in recent],
+      "open": [row["open"] for row in recent],
+      "high": [row["high"] for row in recent],
+      "low": [row["low"] for row in recent],
+      "close": [row["close"] for row in recent],
+      "price": price,
+      "daily_change": price - prev_price,
+      "daily_pct_change": ((price / prev_price) - 1) * 100 if prev_price else 0,
+      "window_change": price - first_price,
+      "window_pct_change": ((price / first_price) - 1) * 100 if first_price else 0,
+      "market_date": last["date"],
+      "fallback": True,
+      "error": str(exc),
+    }
+
+
+def build_asset_payload(assets_config, days):
+  assets_by_symbol = {}
+  max_workers = min(len(assets_config), 5)
+  with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    futures = {
+      executor.submit(build_single_asset_payload, asset, days): asset
+      for asset in assets_config
+    }
+    for future in as_completed(futures):
+      asset = futures[future]
+      assets_by_symbol[asset["symbol"]] = future.result()
+
+  assets = [
+    assets_by_symbol[asset["symbol"]]
+    for asset in assets_config
+    if asset["symbol"] in assets_by_symbol
+  ]
 
   return {
     "assets": assets,
     "last_updated": datetime.now(timezone.utc).isoformat(),
     "fallback": any(asset["fallback"] for asset in assets),
   }
+
+
+def build_markets_payload(days):
+  return build_asset_payload(MARKET_ASSETS, days)
+
+
+def build_stocks_payload(days):
+  return build_asset_payload(STOCK_ASSETS, days)
 
 
 def nearest_levels(prices, last_price):
@@ -791,6 +861,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         payload = build_risk_payload(days)
       elif parsed.path == "/api/markets":
         payload = build_markets_payload(days)
+      elif parsed.path == "/api/stocks":
+        payload = build_stocks_payload(days)
       elif parsed.path == "/api/sentiment":
         payload = build_sentiment_payload()
       else:
