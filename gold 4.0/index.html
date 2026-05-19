@@ -78,8 +78,17 @@
       </div>
       <div class="controls">
         <span class="control-label" data-i18n="window">Window</span>
-        <input id="days-slider" type="range" min="60" max="10000" step="10" value="10000" aria-label="Analysis window in days">
-        <span class="control-label" id="days-label">All</span>
+        <div class="range-presets" data-range-controls>
+          <button class="range-btn" data-range="1h" type="button">1H</button>
+          <button class="range-btn" data-range="1d" type="button">1D</button>
+          <button class="range-btn" data-range="1w" type="button">1W</button>
+          <button class="range-btn" data-range="1mo" type="button">1M</button>
+          <button class="range-btn" data-range="60d" type="button">60D</button>
+          <button class="range-btn" data-range="3mo" type="button">3M</button>
+          <button class="range-btn" data-range="6mo" type="button">6M</button>
+          <button class="range-btn" data-range="1y" type="button">1Y</button>
+          <button class="range-btn" data-range="all" type="button">All</button>
+        </div>
         <button class="btn-refresh" id="btn-refresh" data-i18n="refresh" type="button">Refresh</button>
       </div>
     </section>
@@ -259,7 +268,20 @@
       </section>
 
       <section class="stock-toolbar">
-        <div class="section-kicker" data-i18n="stock_price_analysis">Stock Price Analysis</div>
+        <div class="stock-toolbar-main">
+          <div class="section-kicker" data-i18n="stock_price_analysis">Stock Price Analysis</div>
+          <div class="range-presets" data-range-controls>
+            <button class="range-btn" data-range="1h" type="button">1H</button>
+            <button class="range-btn" data-range="1d" type="button">1D</button>
+            <button class="range-btn" data-range="1w" type="button">1W</button>
+            <button class="range-btn" data-range="1mo" type="button">1M</button>
+            <button class="range-btn" data-range="60d" type="button">60D</button>
+            <button class="range-btn" data-range="3mo" type="button">3M</button>
+            <button class="range-btn" data-range="6mo" type="button">6M</button>
+            <button class="range-btn" data-range="1y" type="button">1Y</button>
+            <button class="range-btn" data-range="all" type="button">All</button>
+          </div>
+        </div>
         <button class="btn-refresh" id="btn-stock-refresh" data-i18n="refresh" type="button">Refresh</button>
       </section>
 

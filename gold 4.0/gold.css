@@ -460,6 +460,8 @@ header {
   align-items: center;
   gap: 10px;
   padding: 0 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .control-label {
@@ -474,6 +476,40 @@ header {
   min-width: 40px;
   color: var(--gold);
   text-align: right;
+}
+
+.range-presets {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.range-btn {
+  min-height: 28px;
+  min-width: 42px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 0 8px;
+  background: #090c11;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.range-btn:hover {
+  border-color: var(--gold);
+  color: var(--text);
+}
+
+.range-btn.active {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #050607;
 }
 
 input[type="range"] {
@@ -692,6 +728,13 @@ input[type="range"] {
   background: #07090c;
 }
 
+.stock-toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .market-warning {
   padding: 10px 12px;
   border: 1px solid rgba(255, 122, 0, 0.45);
@@ -800,8 +843,10 @@ input[type="range"] {
   }
   .controls {
     min-height: 42px;
-    justify-content: space-between;
+    justify-content: flex-start;
   }
+  .stock-toolbar,
+  .stock-toolbar-main { flex-direction: column; align-items: flex-start; }
   .metrics,
   #tab-risk .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sentiment-top,

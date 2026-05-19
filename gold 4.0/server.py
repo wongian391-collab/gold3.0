@@ -20,9 +20,22 @@ ROOT = Path(__file__).resolve().parent
 CACHE_TTL_SECONDS = 60
 USER_AGENT = "GoldPriceAnalyst/1.0"
 FULL_HISTORY_DAYS = 10000
+DEFAULT_WINDOW_KEY = "60d"
 NEWS_FEED = "https://news.google.com/rss/search?q=gold+price&hl=en-US&gl=US&ceid=US:en"
 YAHOO_CHART_RANGE = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_spec}&interval=1d&includePrePost=false&events=div%2Csplits"
+YAHOO_CHART_WINDOW = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_spec}&interval={interval}&includePrePost=false&events=div%2Csplits"
 YAHOO_CHART_PERIOD = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1=0&period2={period2}&interval=1d&includePrePost=false&events=div%2Csplits"
+WINDOW_PRESETS = {
+  "1h": {"key": "1h", "label": "1H", "days": 1, "range_spec": "1d", "interval": "5m", "limit": 12, "min_rows": 2},
+  "1d": {"key": "1d", "label": "1D", "days": 1, "range_spec": "1d", "interval": "5m", "min_rows": 2},
+  "1w": {"key": "1w", "label": "1W", "days": 7, "range_spec": "7d", "interval": "1h", "min_rows": 6},
+  "1mo": {"key": "1mo", "label": "1M", "days": 30},
+  "60d": {"key": "60d", "label": "60D", "days": 60},
+  "3mo": {"key": "3mo", "label": "3M", "days": 90},
+  "6mo": {"key": "6mo", "label": "6M", "days": 180},
+  "1y": {"key": "1y", "label": "1Y", "days": 365},
+  "all": {"key": "all", "label": "All", "days": FULL_HISTORY_DAYS},
+}
 CORRELATION_ASSETS = [
   {"label": "DXY", "symbol": "DX-Y.NYB"},
   {"label": "Silver", "symbol": "SI=F"},
@@ -200,6 +213,45 @@ def daily_returns_by_date(rows):
   return out
 
 
+def normalize_window(window_or_days=None):
+  if isinstance(window_or_days, dict):
+    return window_or_days
+  if isinstance(window_or_days, str):
+    return dict(WINDOW_PRESETS.get(window_or_days, WINDOW_PRESETS[DEFAULT_WINDOW_KEY]))
+  if isinstance(window_or_days, int):
+    if window_or_days >= FULL_HISTORY_DAYS:
+      return dict(WINDOW_PRESETS["all"])
+    return {
+      "key": f"{window_or_days}d",
+      "label": f"{window_or_days}D",
+      "days": max(1, min(window_or_days, FULL_HISTORY_DAYS)),
+    }
+  return dict(WINDOW_PRESETS[DEFAULT_WINDOW_KEY])
+
+
+def parse_window(params):
+  range_key = (params.get("range", [DEFAULT_WINDOW_KEY])[0] or DEFAULT_WINDOW_KEY).lower()
+  if range_key in WINDOW_PRESETS:
+    return dict(WINDOW_PRESETS[range_key])
+
+  try:
+    days = int(params.get("days", [str(WINDOW_PRESETS[DEFAULT_WINDOW_KEY]["days"])])[0])
+  except (TypeError, ValueError):
+    raise ValueError(f"range must be one of {', '.join(WINDOW_PRESETS)}")
+  return normalize_window(max(1, min(days, FULL_HISTORY_DAYS)))
+
+
+def rows_for_window(rows, window_or_days):
+  window = normalize_window(window_or_days)
+  if window.get("limit"):
+    return rows[-window["limit"]:]
+  if window.get("range_spec"):
+    return rows
+  if window["days"] >= FULL_HISTORY_DAYS:
+    return rows
+  return rows[-window["days"]:] if len(rows) >= window["days"] else rows
+
+
 def chart_history(symbol, required_days, normalize_scaled_gold=False):
   key = f"history:{symbol}:{required_days}"
   cached = cache_get(key)
@@ -208,7 +260,10 @@ def chart_history(symbol, required_days, normalize_scaled_gold=False):
 
   encoded_symbol = urllib.parse.quote(symbol, safe="")
   if required_days >= FULL_HISTORY_DAYS:
-    payload = fetch_json(YAHOO_CHART_PERIOD.format(symbol=encoded_symbol, period2=int(time.time())))
+    try:
+      payload = fetch_json(YAHOO_CHART_PERIOD.format(symbol=encoded_symbol, period2=int(time.time())))
+    except Exception:
+      payload = fetch_json(YAHOO_CHART_WINDOW.format(symbol=encoded_symbol, range_spec="max", interval="1d"))
   else:
     range_days = max(required_days + 260, 450)
     payload = fetch_json(YAHOO_CHART_RANGE.format(symbol=encoded_symbol, range_spec=f"{range_days}d"))
@@ -237,6 +292,63 @@ def chart_history(symbol, required_days, normalize_scaled_gold=False):
     })
 
   min_required = 30 if required_days >= FULL_HISTORY_DAYS else max(required_days, 30)
+  if len(rows) < min_required:
+    raise ValueError(f"Not enough historical data returned for {symbol}")
+
+  median_close = statistics.median(row["close"] for row in rows)
+  if normalize_scaled_gold and median_close < 100:
+    for row in rows:
+      row["close"] *= 100
+      row["open"] *= 100
+      row["high"] *= 100
+      row["low"] *= 100
+
+  return cache_set(key, rows)
+
+
+def chart_history_for_window(symbol, window_or_days, normalize_scaled_gold=False):
+  window = normalize_window(window_or_days)
+  if not window.get("range_spec"):
+    return chart_history(symbol, window["days"], normalize_scaled_gold)
+
+  key = f"history:{symbol}:{window['key']}:{window['range_spec']}:{window['interval']}"
+  cached = cache_get(key)
+  if cached is not None:
+    return cached
+
+  encoded_symbol = urllib.parse.quote(symbol, safe="")
+  payload = fetch_json(YAHOO_CHART_WINDOW.format(
+    symbol=encoded_symbol,
+    range_spec=window["range_spec"],
+    interval=urllib.parse.quote(window["interval"], safe=""),
+  ))
+  result = payload["chart"]["result"][0]
+  quote = result["indicators"]["quote"][0]
+  timestamps = result.get("timestamp", [])
+  closes = quote.get("close", [])
+  highs = quote.get("high", [])
+  lows = quote.get("low", [])
+  opens = quote.get("open", [])
+  volumes = quote.get("volume", [])
+  date_fmt = "%Y-%m-%d %H:%M" if window["interval"] != "1d" else "%Y-%m-%d"
+
+  rows = []
+  for idx, ts in enumerate(timestamps):
+    close = closes[idx]
+    if close is None:
+      continue
+    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+    rows.append({
+      "date": dt.strftime(date_fmt),
+      "close": float(close),
+      "open": float(opens[idx]) if opens[idx] is not None else float(close),
+      "high": float(highs[idx]) if highs[idx] is not None else float(close),
+      "low": float(lows[idx]) if lows[idx] is not None else float(close),
+      "volume": int(volumes[idx]) if volumes[idx] is not None else 0,
+    })
+
+  rows = rows_for_window(rows, window)
+  min_required = window.get("min_rows", 2)
   if len(rows) < min_required:
     raise ValueError(f"Not enough historical data returned for {symbol}")
 
@@ -331,31 +443,34 @@ def generated_asset_history(symbol, required_days):
   return cache_set(key, rows)
 
 
-def market_history(symbol, required_days):
+def market_history(symbol, window_or_days):
+  window = normalize_window(window_or_days)
   try:
-    return chart_history(symbol, required_days)
+    return chart_history_for_window(symbol, window)
   except Exception as exc:
     print(f"[fallback] using generated {symbol} data: {exc}")
-    return generated_asset_history(symbol, required_days)
+    return generated_asset_history(symbol, window["days"])
 
 
-def price_history(required_days):
+def price_history(window_or_days):
+  window = normalize_window(window_or_days)
   try:
-    history = chart_history("GC=F", required_days, normalize_scaled_gold=True)
+    history = chart_history_for_window("GC=F", window, normalize_scaled_gold=True)
   except Exception as exc:
     print(f"[fallback] using generated gold data: {exc}")
-    history = generated_price_history(required_days)
+    history = generated_price_history(window["days"])
 
-  min_required = 210 if required_days >= FULL_HISTORY_DAYS else max(required_days, 210)
+  min_required = window.get("min_rows", 2) if window.get("range_spec") else 210
   if len(history) < min_required:
     raise ValueError("Not enough historical price data returned")
   return history
 
 
-def build_single_asset_payload(asset, days):
+def build_single_asset_payload(asset, window_or_days):
+  window = normalize_window(window_or_days)
   try:
-    rows = market_history(asset["symbol"], days)
-    recent = rows[-days:] if len(rows) >= days else rows
+    rows = market_history(asset["symbol"], window)
+    recent = rows_for_window(rows, window)
     if len(recent) < 2:
       raise ValueError(f"Not enough historical data returned for {asset['symbol']}")
 
@@ -384,8 +499,8 @@ def build_single_asset_payload(asset, days):
     }
   except Exception as exc:
     print(f"[asset] {asset['symbol']} failed: {exc}")
-    rows = generated_asset_history(asset["symbol"], days)
-    recent = rows[-days:] if len(rows) >= days else rows
+    rows = generated_asset_history(asset["symbol"], window["days"])
+    recent = rows_for_window(rows, window)
     last = recent[-1]
     prev = recent[-2]
     first = recent[0]
@@ -412,12 +527,13 @@ def build_single_asset_payload(asset, days):
     }
 
 
-def build_asset_payload(assets_config, days):
+def build_asset_payload(assets_config, window_or_days):
+  window = normalize_window(window_or_days)
   assets_by_symbol = {}
   max_workers = min(len(assets_config), 5)
   with ThreadPoolExecutor(max_workers=max_workers) as executor:
     futures = {
-      executor.submit(build_single_asset_payload, asset, days): asset
+      executor.submit(build_single_asset_payload, asset, window): asset
       for asset in assets_config
     }
     for future in as_completed(futures):
@@ -437,12 +553,12 @@ def build_asset_payload(assets_config, days):
   }
 
 
-def build_markets_payload(days):
-  return build_asset_payload(MARKET_ASSETS, days)
+def build_markets_payload(window_or_days):
+  return build_asset_payload(MARKET_ASSETS, window_or_days)
 
 
-def build_stocks_payload(days):
-  return build_asset_payload(STOCK_ASSETS, days)
+def build_stocks_payload(window_or_days):
+  return build_asset_payload(STOCK_ASSETS, window_or_days)
 
 
 def nearest_levels(prices, last_price):
@@ -463,8 +579,9 @@ def nearest_levels(prices, last_price):
   return round(nearest_support, 2), round(nearest_resistance, 2)
 
 
-def build_data_payload(days):
-  history = price_history(days)
+def build_data_payload(window_or_days):
+  window = normalize_window(window_or_days)
+  history = price_history(window)
   prices_all = [row["close"] for row in history]
   dates_all = [row["date"] for row in history]
   latest_row = history[-1]
@@ -480,17 +597,19 @@ def build_data_payload(days):
   macd_hist_all = [a - b for a, b in zip(macd_line_all, macd_signal_all)]
   bb_upper_all, bb_lower_all = bollinger(prices_all, 20, 2)
 
-  dates = dates_all[-days:]
-  prices = prices_all[-days:]
-  ma20 = ma20_all[-days:]
-  ma50 = ma50_all[-days:]
-  ma200 = ma200_all[-days:]
-  rsi = rsi_all[-days:]
-  macd_line = macd_line_all[-days:]
-  macd_signal = macd_signal_all[-days:]
-  macd_hist = macd_hist_all[-days:]
-  bb_upper = bb_upper_all[-days:]
-  bb_lower = bb_lower_all[-days:]
+  display_rows = rows_for_window(list(range(len(history))), window)
+  start_idx = display_rows[0] if display_rows else 0
+  dates = dates_all[start_idx:]
+  prices = prices_all[start_idx:]
+  ma20 = ma20_all[start_idx:]
+  ma50 = ma50_all[start_idx:]
+  ma200 = ma200_all[start_idx:]
+  rsi = rsi_all[start_idx:]
+  macd_line = macd_line_all[start_idx:]
+  macd_signal = macd_signal_all[start_idx:]
+  macd_hist = macd_hist_all[start_idx:]
+  bb_upper = bb_upper_all[start_idx:]
+  bb_lower = bb_lower_all[start_idx:]
 
   last_price = prices_all[-1]
   prev_close = prices_all[-2]
@@ -535,8 +654,8 @@ def build_data_payload(days):
   }
 
 
-def build_backtest_payload(days):
-  data = build_data_payload(days)
+def build_backtest_payload(window_or_days):
+  data = build_data_payload(window_or_days)
   dates = data["dates"]
   prices = data["prices"]
   ma20 = data["ma20"]
@@ -627,18 +746,19 @@ def build_backtest_payload(days):
   }
 
 
-def build_cross_asset_correlations(gold_dates, gold_prices, days):
+def build_cross_asset_correlations(gold_dates, gold_prices, window_or_days):
+  window = normalize_window(window_or_days)
   gold_rows = [
     {"date": date, "close": close}
     for date, close in zip(gold_dates, gold_prices)
   ]
   gold_returns = daily_returns_by_date(gold_rows)
   correlations = []
-  min_observations = max(20, min(45, days // 3))
+  min_observations = max(2, min(45, max(2, len(gold_returns) // 3)))
 
   for asset in CORRELATION_ASSETS:
     try:
-      rows = chart_history(asset["symbol"], days)
+      rows = market_history(asset["symbol"], window)
       asset_returns = daily_returns_by_date(rows)
       shared_dates = sorted(set(gold_returns) & set(asset_returns))
       if len(shared_dates) < min_observations:
@@ -662,8 +782,9 @@ def build_cross_asset_correlations(gold_dates, gold_prices, days):
   return correlations
 
 
-def build_risk_payload(days):
-  data = build_data_payload(days)
+def build_risk_payload(window_or_days):
+  window = normalize_window(window_or_days)
+  data = build_data_payload(window)
   prices = data["prices"]
   dates = data["dates"]
   returns = [((prices[i] / prices[i - 1]) - 1) * 100 for i in range(1, len(prices))]
@@ -704,7 +825,7 @@ def build_risk_payload(days):
     "returns": returns,
     "dd_dates": dates,
     "drawdown": drawdown,
-    "correlations": build_cross_asset_correlations(dates, prices, days),
+    "correlations": build_cross_asset_correlations(dates, prices, window),
   }
 
 
@@ -846,23 +967,22 @@ class AppHandler(SimpleHTTPRequestHandler):
   def handle_api(self, parsed):
     params = urllib.parse.parse_qs(parsed.query)
     try:
-      days = int(params.get("days", [str(FULL_HISTORY_DAYS)])[0])
-    except (TypeError, ValueError):
-      self.send_json({"error": f"days must be an integer between 60 and {FULL_HISTORY_DAYS}"}, status=400)
+      window = parse_window(params)
+    except ValueError as exc:
+      self.send_json({"error": str(exc)}, status=400)
       return
-    days = max(60, min(days, FULL_HISTORY_DAYS))
 
     try:
       if parsed.path == "/api/data":
-        payload = build_data_payload(days)
+        payload = build_data_payload(window)
       elif parsed.path == "/api/backtest":
-        payload = build_backtest_payload(days)
+        payload = build_backtest_payload(window)
       elif parsed.path == "/api/risk":
-        payload = build_risk_payload(days)
+        payload = build_risk_payload(window)
       elif parsed.path == "/api/markets":
-        payload = build_markets_payload(days)
+        payload = build_markets_payload(window)
       elif parsed.path == "/api/stocks":
-        payload = build_stocks_payload(days)
+        payload = build_stocks_payload(window)
       elif parsed.path == "/api/sentiment":
         payload = build_sentiment_payload()
       else:

@@ -2,8 +2,23 @@
 
 // ── State ─────────────────────────────────────────────────────────
 const ALL_HISTORY_DAYS = 10000;
-let days     = ALL_HISTORY_DAYS;
-const loaded = new Set();       // tracks "tab:days" combos already rendered
+const DEFAULT_RANGE_KEY = '60d';
+const RANGE_PRESETS = [
+  { key: '1h', label: '1H', days: 1 },
+  { key: '1d', label: '1D', days: 1 },
+  { key: '1w', label: '1W', days: 7 },
+  { key: '1mo', label: '1M', days: 30 },
+  { key: '60d', label: '60D', days: 60 },
+  { key: '3mo', label: '3M', days: 90 },
+  { key: '6mo', label: '6M', days: 180 },
+  { key: '1y', label: '1Y', days: 365 },
+  { key: 'all', label: 'All', days: ALL_HISTORY_DAYS },
+];
+let rangeKey = RANGE_PRESETS.some(p => p.key === localStorage.getItem('gold_range'))
+  ? localStorage.getItem('gold_range')
+  : DEFAULT_RANGE_KEY;
+let days = RANGE_PRESETS.find(p => p.key === rangeKey)?.days || 60;
+const loaded = new Set();       // tracks "tab:range" combos already rendered
 const _fetch = {};              // deduplicates in-flight / completed fetches
 const DEMO_MODE = { enabled: false };
 const ALLOW_MOCK_DATA = new URLSearchParams(window.location.search).get('demo') === '1';
@@ -217,6 +232,7 @@ function ema(values, period) {
 
 function computeRSI(prices, period = 14) {
   const rsis = Array(prices.length).fill(null);
+  if (prices.length <= period) return rsis;
   let gains = 0;
   let losses = 0;
 
@@ -507,7 +523,8 @@ function mockMarketAsset(label, symbol, unit, base, slope, windowDays, phase) {
 
 function getMockPayload(url) {
   const parsed = new URL(url, window.location.origin);
-  const windowDays = Number(parsed.searchParams.get('days') || days);
+  const requestedRange = parsed.searchParams.get('range') || rangeKey;
+  const windowDays = Math.max(2, RANGE_PRESETS.find(p => p.key === requestedRange)?.days || Number(parsed.searchParams.get('days') || days));
   const mock = buildMockData(windowDays);
 
   if (parsed.pathname === '/api/data') return mock.data;
@@ -589,7 +606,12 @@ const fmtUSD = n => '$' + fmtN(n);
 const fmtPct = n => (n >= 0 ? '+' : '') + fmtN(n) + '%';
 const sign   = n => n >= 0 ? 'bull' : 'bear';
 const moveClass = n => n > 0 ? 'up' : n < 0 ? 'down' : 'flat';
-const windowLabel = (value = days) => value >= ALL_HISTORY_DAYS ? 'All' : `${value}d`;
+const rangePreset = (key = rangeKey) => RANGE_PRESETS.find(p => p.key === key) || RANGE_PRESETS.find(p => p.key === DEFAULT_RANGE_KEY);
+const windowLabel = (value = rangeKey) => {
+  if (typeof value === 'string') return rangePreset(value).label;
+  return value >= ALL_HISTORY_DAYS ? 'All' : `${value}D`;
+};
+const apiUrl = path => `${path}?range=${encodeURIComponent(rangeKey)}`;
 const fmtMarketPrice = asset => {
   if (asset.unit === 'index') return fmtN(asset.price);
   if (asset.unit === 'JPY/AUD') return `¥${fmtN(asset.price, 2)} / AUD`;
@@ -765,7 +787,7 @@ function activateAnalysis(kind) {
 }
 
 function loadTab(tab) {
-  const key = tab + ':' + days;
+  const key = tab + ':' + rangeKey;
   if (loaded.has(key)) return;
   loaded.add(key);
   ({ patterns: loadPatterns, sentiment: loadSentiment,
@@ -786,21 +808,20 @@ function marketSlug(symbol) {
   return symbol.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
 }
 
-// ── Slider ────────────────────────────────────────────────────────
+// ── Range controls ────────────────────────────────────────────────
 function initControls() {
-  const slider = $id('days-slider');
-  const dLabel = $id('days-label');
   const refreshBtn = $id('btn-refresh');
 
-  if (slider && dLabel) {
-    dLabel.textContent = windowLabel(Number(slider.value));
-    slider.addEventListener('input', () => { dLabel.textContent = windowLabel(Number(slider.value)); });
-    slider.addEventListener('change', () => {
-      days = parseInt(slider.value, 10);
-      dLabel.textContent = windowLabel(days);
+  document.querySelectorAll('.range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      rangeKey = btn.dataset.range;
+      days = rangePreset(rangeKey).days;
+      localStorage.setItem('gold_range', rangeKey);
+      applyRangeButtons();
       refreshAll();
     });
-  }
+  });
+  applyRangeButtons();
 
   if (refreshBtn) {
     refreshBtn.addEventListener('click', () => {
@@ -808,6 +829,12 @@ function initControls() {
       refreshAll();
     });
   }
+}
+
+function applyRangeButtons() {
+  document.querySelectorAll('.range-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.range === rangeKey);
+  });
 }
 
 function initStockControls() {
@@ -888,7 +915,7 @@ function initAutoRefresh() {
 // ══════════════════════════════════════════════════════════════════
 async function loadHeader() {
   try {
-    const d = await apiFetch(`/api/data?days=${days}`);
+    const d = await apiFetch(apiUrl('/api/data'));
     if (d.error) throw new Error(d.error);
 
     setText('header-price', fmtUSD(d.last_price));
@@ -900,7 +927,7 @@ async function loadHeader() {
       chEl.textContent = `${arrow} ${fmtUSD(Math.abs(dailyChange))} (${fmtPct(dailyPctChange)})`;
       chEl.className = 'ticker-change ' + moveClass(dailyChange);
     }
-    setText('header-date', t('market_window', days, d.market_date || d.dates.at(-1)));
+    setText('header-date', t('market_window', rangeKey, d.market_date || d.dates.at(-1)));
     setText('header-updated', t('last_checked', fmtLocalTime(d.last_updated)));
 
     setText('stat-price', fmtUSD(d.last_price));
@@ -934,7 +961,7 @@ async function loadMarkets() {
   if (!grid) return;
 
   try {
-    const d = await apiFetch(`/api/markets?days=${days}`);
+    const d = await apiFetch(apiUrl('/api/markets'));
     if (d.error) throw new Error(d.error);
     const assets = Array.isArray(d.assets) ? d.assets : [];
     if (!assets.length) throw new Error('No market data returned');
@@ -992,7 +1019,7 @@ async function loadMarketCharts() {
   if (!container) return;
 
   try {
-    const d = await apiFetch(`/api/markets?days=${days}`);
+    const d = await apiFetch(apiUrl('/api/markets'));
     if (d.error) throw new Error(d.error);
     const rawAssets = Array.isArray(d.assets) ? d.assets : [];
     const assets = rawAssets.filter(hasActualMarketSeries);
@@ -1084,7 +1111,7 @@ async function loadStocks() {
   if (!grid) return;
 
   try {
-    const d = await apiFetch(`/api/stocks?days=${days}`);
+    const d = await apiFetch(apiUrl('/api/stocks'));
     if (d.error) throw new Error(d.error);
     const assets = Array.isArray(d.assets) ? d.assets : [];
     if (!assets.length) throw new Error('No stock data returned');
@@ -1127,7 +1154,7 @@ async function loadStockCharts() {
   if (!container) return;
 
   try {
-    const d = await apiFetch(`/api/stocks?days=${days}`);
+    const d = await apiFetch(apiUrl('/api/stocks'));
     if (d.error) throw new Error(d.error);
     const rawAssets = Array.isArray(d.assets) ? d.assets : [];
     const assets = rawAssets.filter(hasActualMarketSeries);
@@ -1220,11 +1247,11 @@ async function loadStockCharts() {
 async function loadPatterns() {
   if (!$id('patterns-chart')) return;
   // Kick off all other endpoints in the background so tab switches are instant
-  apiFetch(`/api/backtest?days=${days}`);
-  apiFetch(`/api/risk?days=${days}`);
+  apiFetch(apiUrl('/api/backtest'));
+  apiFetch(apiUrl('/api/risk'));
   apiFetch('/api/sentiment');
   try {
-    const d = await apiFetch(`/api/data?days=${days}`);
+    const d = await apiFetch(apiUrl('/api/data'));
     if (d.error) throw new Error(d.error);
 
     const { dates, prices, ma20, ma50, ma200, rsi,
@@ -1390,7 +1417,7 @@ async function loadSentiment() {
 async function loadBacktest() {
   if (!$id('backtest-chart')) return;
   try {
-    const d = await apiFetch(`/api/backtest?days=${days}`);
+    const d = await apiFetch(apiUrl('/api/backtest'));
     if (d.error) throw new Error(d.error);
 
     // Metric cards
@@ -1448,7 +1475,7 @@ async function loadBacktest() {
 async function loadRisk() {
   if (!$id('risk-vol-chart')) return;
   try {
-    const d = await apiFetch(`/api/risk?days=${days}`);
+    const d = await apiFetch(apiUrl('/api/risk'));
     if (d.error) throw new Error(d.error);
 
     // Metric cards
