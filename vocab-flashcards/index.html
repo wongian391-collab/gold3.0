@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vocab Vault</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">Daily vocabulary</p>
+      <h1>Vocab Vault</h1>
+    </div>
+    <div class="header-actions">
+      <span class="save-status" id="local-save-status" aria-live="polite">Domestic log ready</span>
+      <button class="icon-btn" id="sync-now-btn" type="button" title="Sync domestic memory" aria-label="Sync domestic memory">Sync now</button>
+      <button class="icon-btn" id="export-log-btn" type="button" title="Export domestic log" aria-label="Export domestic log">Export log</button>
+      <button class="icon-btn" id="export-btn" type="button" title="Export deck" aria-label="Export deck">Export</button>
+      <label class="icon-btn file-btn" title="Import deck">
+        Import
+        <input id="import-input" type="file" accept="application/json">
+      </label>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section class="stats-grid" aria-label="Deck summary">
+      <article class="stat">
+        <span>Today</span>
+        <strong id="today-count">0</strong>
+      </article>
+      <article class="stat">
+        <span>Due</span>
+        <strong id="due-count">0</strong>
+      </article>
+      <article class="stat">
+        <span>Total</span>
+        <strong id="total-count">0</strong>
+      </article>
+      <article class="stat">
+        <span>Streak</span>
+        <strong id="streak-count">0</strong>
+      </article>
+    </section>
+
+    <nav class="tabs" aria-label="Main sections">
+      <button class="tab active" data-view="add" type="button">Add</button>
+      <button class="tab" data-view="review" type="button">Review</button>
+      <button class="tab" data-view="deck" type="button">Deck</button>
+    </nav>
+
+    <section class="view active" id="view-add">
+      <form class="entry-form" id="entry-form">
+        <div class="form-row">
+          <label>
+            Word
+            <input id="word-input" name="word" type="text" autocomplete="off" required placeholder="serendipity">
+          </label>
+          <label>
+            Date
+            <input id="date-input" name="date" type="date" required>
+          </label>
+        </div>
+        <label>
+          Meaning
+          <textarea id="meaning-input" name="meaning" rows="3" required placeholder="Finding something good without looking for it"></textarea>
+        </label>
+        <label>
+          Example sentence
+          <textarea id="example-input" name="example" rows="2" placeholder="It was pure serendipity that I found the book."></textarea>
+        </label>
+        <div class="form-row">
+          <label>
+            Notes or translation
+            <input id="notes-input" name="notes" type="text" placeholder="optional">
+          </label>
+          <label>
+            Tags
+            <input id="tags-input" name="tags" type="text" placeholder="exam, reading, slang">
+          </label>
+        </div>
+        <button class="primary-btn" type="submit">Add flashcard</button>
+      </form>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Today's words</h2>
+          <span id="today-label"></span>
+        </div>
+        <div class="word-list" id="today-list"></div>
+      </section>
+    </section>
+
+    <section class="view" id="view-review">
+      <section class="review-stage" id="review-stage">
+        <div class="empty-state">
+          <h2>No cards due</h2>
+          <p>Add a new word or come back when your next review is ready.</p>
+        </div>
+      </section>
+    </section>
+
+    <section class="view" id="view-deck">
+      <div class="deck-toolbar">
+        <label class="search-box">
+          Search
+          <input id="search-input" type="search" placeholder="word, meaning, tag">
+        </label>
+        <label class="search-box">
+          Filter by date
+          <input id="filter-date" type="date">
+        </label>
+        <button class="ghost-btn" id="clear-filter" type="button">Clear</button>
+      </div>
+      <div class="day-groups" id="deck-list"></div>
+    </section>
+  </main>
+
+  <template id="word-template">
+    <article class="word-card">
+      <div>
+        <h3></h3>
+        <p class="meaning"></p>
+        <p class="example"></p>
+        <p class="meta"></p>
+      </div>
+      <button class="delete-btn" type="button" title="Delete card" aria-label="Delete card">Delete</button>
+    </article>
+  </template>
+</body>
+</html>

@@ -233,6 +233,8 @@ def parse_window(params):
   range_key = (params.get("range", [DEFAULT_WINDOW_KEY])[0] or DEFAULT_WINDOW_KEY).lower()
   if range_key in WINDOW_PRESETS:
     return dict(WINDOW_PRESETS[range_key])
+  if "range" in params:
+    raise ValueError(f"range must be one of {', '.join(WINDOW_PRESETS)}")
 
   try:
     days = int(params.get("days", [str(WINDOW_PRESETS[DEFAULT_WINDOW_KEY]["days"])])[0])
@@ -616,8 +618,11 @@ def build_data_payload(window_or_days):
   first_price = prices[0]
   nearest_support, nearest_resistance = nearest_levels(prices_all, last_price)
   bb_pct = 50.0
-  if bb_upper_all[-1] is not None and bb_lower_all[-1] is not None and bb_upper_all[-1] != bb_lower_all[-1]:
+  bb_available = bb_upper_all[-1] is not None and bb_lower_all[-1] is not None and bb_upper_all[-1] != bb_lower_all[-1]
+  if bb_available:
     bb_pct = ((last_price - bb_lower_all[-1]) / (bb_upper_all[-1] - bb_lower_all[-1])) * 100
+  rsi_available = rsi_all[-1] is not None
+  ma_available = ma20_all[-1] is not None and ma50_all[-1] is not None
 
   return {
     "dates": dates,
@@ -632,11 +637,14 @@ def build_data_payload(window_or_days):
     "bb_upper": bb_upper,
     "bb_lower": bb_lower,
     "signals": {
-      "rsi": rsi_all[-1] or 50.0,
+      "rsi": rsi_all[-1] if rsi_available else 50.0,
+      "rsi_available": rsi_available,
       "macd_val": macd_line_all[-1],
       "macd_bull": macd_line_all[-1] > macd_signal_all[-1],
       "bb_pct": bb_pct,
-      "ma_bull": (ma20_all[-1] or last_price) > (ma50_all[-1] or last_price),
+      "bb_available": bb_available,
+      "ma_bull": ma20_all[-1] > ma50_all[-1] if ma_available else None,
+      "ma_available": ma_available,
     },
     "nearest_support": nearest_support,
     "nearest_resistance": nearest_resistance,

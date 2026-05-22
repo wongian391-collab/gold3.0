@@ -56,6 +56,7 @@ const I18N = {
     window: 'Window',
     refresh: 'Refresh',
     awaiting_data: 'Awaiting data',
+    insufficient_data: 'Insufficient data',
     bollinger_position: 'Bollinger Position',
     ma_trend: 'MA Trend',
     buy_hold: 'Buy & Hold',
@@ -137,6 +138,7 @@ const I18N = {
     window: '区间',
     refresh: '刷新',
     awaiting_data: '等待数据中',
+    insufficient_data: '数据不足',
     bollinger_position: '布林带位置',
     ma_trend: '均线趋势',
     buy_hold: '买入持有',
@@ -407,10 +409,13 @@ function buildMockData(windowDays) {
       bb_lower: bbLower,
       signals: {
         rsi: lastRsi,
+        rsi_available: lastRsi != null,
         macd_val: lastMacd,
         macd_bull: macdBull,
         bb_pct: lastBbPct,
+        bb_available: bbUpper.at(-1) != null && bbLower.at(-1) != null,
         ma_bull: maBull,
+        ma_available: ma20.at(-1) != null && ma50.at(-1) != null,
       },
       nearest_support: nearestSupport,
       nearest_resistance: nearestResistance,
@@ -1262,19 +1267,34 @@ async function loadPatterns() {
     window.__goldData = d;
 
     // Metric cards
+    const rsiAvailable = signals.rsi_available !== false;
+    const bbAvailable = signals.bb_available !== false;
+    const maAvailable = signals.ma_available !== false;
     const rsiCls = signals.rsi > 70 ? 'bear' : signals.rsi < 30 ? 'bull' : '';
-    setMetric('m-rsi',  signals.rsi.toFixed(1),
-      signals.rsi > 70 ? t('overbought') : signals.rsi < 30 ? t('oversold') : t('neutral'), rsiCls);
+    if (rsiAvailable) {
+      setMetric('m-rsi',  signals.rsi.toFixed(1),
+        signals.rsi > 70 ? t('overbought') : signals.rsi < 30 ? t('oversold') : t('neutral'), rsiCls);
+    } else {
+      setMetric('m-rsi', '—', t('insufficient_data'), 'muted');
+    }
     setMetric('m-macd', (signals.macd_val >= 0 ? '+' : '') + fmtN(signals.macd_val),
       signals.macd_bull ? t('bullish') : t('bearish'),
       signals.macd_bull ? 'bull' : 'bear');
     const bbCls = signals.bb_pct > 80 ? 'warn' : signals.bb_pct < 20 ? 'bull' : '';
-    setMetric('m-bb', signals.bb_pct.toFixed(1) + '%',
-      signals.bb_pct > 80 ? t('near_upper') : signals.bb_pct < 20 ? t('near_lower') : t('mid_range'), bbCls);
-    setMetric('m-ma',
-      signals.ma_bull ? 'MA20 > MA50' : 'MA20 < MA50',
-      signals.ma_bull ? t('bullish_bias') : t('bearish_bias'),
-      signals.ma_bull ? 'bull' : 'bear');
+    if (bbAvailable) {
+      setMetric('m-bb', signals.bb_pct.toFixed(1) + '%',
+        signals.bb_pct > 80 ? t('near_upper') : signals.bb_pct < 20 ? t('near_lower') : t('mid_range'), bbCls);
+    } else {
+      setMetric('m-bb', '—', t('insufficient_data'), 'muted');
+    }
+    if (maAvailable) {
+      setMetric('m-ma',
+        signals.ma_bull ? 'MA20 > MA50' : 'MA20 < MA50',
+        signals.ma_bull ? t('bullish_bias') : t('bearish_bias'),
+        signals.ma_bull ? 'bull' : 'bear');
+    } else {
+      setMetric('m-ma', '—', t('insufficient_data'), 'muted');
+    }
 
     // Build chart traces — price row shares xaxis, RSI and MACD use yaxis2/3
     // Layout uses domain-based subplots so x-axis zooming syncs automatically
